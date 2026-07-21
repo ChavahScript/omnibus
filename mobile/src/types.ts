@@ -92,6 +92,8 @@ export type HomeFleetSnapshot = {
 export type HomeFleetInvite = {
   correlationId: string;
   command: string;
+  /** Windows-safe form (cmd /c wrapper); absent on older bridge builds. */
+  commandWindows?: string;
   expiresAt: string;
 };
 

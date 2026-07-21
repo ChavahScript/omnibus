@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -223,11 +224,15 @@ export class HomeFleetService implements HomeFleetReviewer {
     this.activeInviteExpiresAt = invitation.expiresAt;
     const payload = serializeHomeFleetJoinInvitation(invitation);
     const version = await installedPackageVersion();
+    // `--yes` belongs to npx only. The bridge still prompts interactively
+    // for the multi-GB local Ollama model download requested by this owner.
+    const bare = `npx --yes omnibus-bridge@${version} worker --join ${payload} --pull-models`;
     return {
       correlationId,
-      // `--yes` belongs to npx only. The bridge still prompts interactively
-      // for the multi-GB local Ollama model download requested by this owner.
-      command: `npx --yes omnibus-bridge@${version} worker --join ${payload} --pull-models`,
+      command: bare,
+      // `cmd /c` resolves npx.cmd directly, so the Windows worker pastes and
+      // runs without tripping PowerShell's default script-execution policy.
+      commandWindows: `cmd /c "${bare}"`,
       expiresAt: invitation.expiresAt,
     };
   }
@@ -599,6 +604,9 @@ export class HomeFleetService implements HomeFleetReviewer {
       await rename(temporary, this.stateFile);
       committed = true;
       await chmod(this.stateFile, 0o600);
+      // This file holds derived worker HMAC secrets. On Windows chmod only
+      // toggles the read-only bit, so also tighten the NTFS ACL to this user.
+      await restrictToCurrentUserOnWindows(this.stateFile);
     } finally {
       if (!committed) await rm(temporary, { force: true }).catch(() => undefined);
     }
@@ -688,6 +696,36 @@ export function selectPrivateLanHost(preferred?: string): string | undefined {
   return candidates[0]?.address;
 }
 
+/**
+ * Best-effort NTFS ACL tightening for a secret-bearing state file on Windows.
+ * `icacls <file> /inheritance:r /grant:r <user>:F` removes inherited ACEs and
+ * grants full control only to the current user. Any failure is swallowed: the
+ * 0600 chmod already ran, this is defense-in-depth, and a demo must never
+ * break because a managed machine restricts icacls. A no-op off Windows.
+ */
+export function restrictToCurrentUserOnWindows(file: string): Promise<void> {
+  if (process.platform !== "win32") return Promise.resolve();
+  const user = process.env.USERDOMAIN && process.env.USERNAME
+    ? `${process.env.USERDOMAIN}\\${process.env.USERNAME}`
+    : process.env.USERNAME;
+  if (!user) return Promise.resolve();
+  return new Promise<void>(resolve => {
+    let child;
+    try {
+      child = spawn("icacls", [file, "/inheritance:r", "/grant:r", `${user}:F`], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } catch {
+      resolve();
+      return;
+    }
+    child.once("error", () => resolve());
+    child.once("close", () => resolve());
+  });
+}
+
 function isRfc1918V4(value: string): boolean {
   if (!isPrivateLanAddress(value) || value.startsWith("127.")) return false;
   return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value);
@@ -702,10 +740,22 @@ function isLocalRfc1918Address(value: string): boolean {
   return false;
 }
 
-function interfacePriority(name: string): number {
+/**
+ * Ranks a network interface as a Home Fleet bind candidate by name. Virtual
+ * adapters are pushed to the back because advertising one (a VPN/hypervisor
+ * address a peer laptop cannot route to) silently breaks the whole fleet.
+ * Windows names virtual adapters more variously than Unix — "vEthernet",
+ * "VMware Network Adapter", "Tailscale", "OpenVPN TAP" — so we match those
+ * substrings anywhere, not just as a prefix. A plainly-renamed VPN like
+ * "Ethernet 2" is genuinely ambiguous by name; HOME_FLEET_BIND_HOST is the
+ * deterministic override the README documents for that case.
+ */
+const VIRTUAL_ADAPTER_MARKERS = /(vethernet|vmware|virtualbox|hyper-?v|tailscale|zerotier|wireguard|openvpn|tap-|tun|\bvpn\b|docker|veth|utun|loopback|pseudo|npcap|anyconnect)/;
+
+export function interfacePriority(name: string): number {
   const lower = name.toLowerCase();
-  if (/^(en|eth|wlan|wi-fi)/.test(lower)) return 0;
-  if (/^(bridge|docker|veth|utun|vpn)/.test(lower)) return 2;
+  if (VIRTUAL_ADAPTER_MARKERS.test(lower)) return 2;
+  if (/^(en|eth|wlan)/.test(lower) || lower.includes("wi-fi") || lower.includes("wifi") || lower.includes("ethernet")) return 0;
   return 1;
 }
 

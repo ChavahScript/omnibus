@@ -283,6 +283,13 @@ Ollama installation and one fixed peer-review role.
    never look alike in Fleet Setup. Re-running with a new `--label` renames
    the laptop over its next signed heartbeat — no re-pairing needed.
 
+   On a Windows worker, use the app's **Windows** command tab, which wraps the
+   line in `cmd /c "…"`; stock PowerShell blocks npm's `npx.ps1` shim under its
+   default execution policy, so the bare command fails on a fresh Windows
+   install. When the listener first binds, allow `node.exe` on **Private**
+   networks if Windows Firewall asks, or the coordinator cannot reach the
+   worker.
+
    The generated command pins the installed package version. Its `npx --yes`
    accepts only the temporary npm package download; Omnibus still asks at the
    worker terminal before the potentially multi-gigabyte model download.

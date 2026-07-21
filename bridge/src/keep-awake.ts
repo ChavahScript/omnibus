@@ -53,6 +53,8 @@ type CommandPlan = {
 const DEFAULT_RESTART_BASE_MS = 5_000;
 const DEFAULT_RESTART_MAX_MS = 5 * 60_000;
 const STABLE_HELPER_RESET_MS = 60_000;
+/** Consecutive never-stabilized restarts before the helper is declared unavailable. */
+const MAX_UNSTABLE_RESTARTS = 5;
 
 // This is fixed source text, never interpolated with a workspace, model,
 // hostname, or user directive. SetThreadExecutionState must be invoked by the
@@ -250,6 +252,25 @@ export class KeepAwakeController {
 
   private scheduleRetry(message: string): void {
     if (!this.desired || !this.options.enabled || !this.plan || this.retryTimer) return;
+    // A helper that spawns cleanly but exits immediately every time — the
+    // Windows AppLocker/ConstrainedLanguage case where powershell.exe runs but
+    // Add-Type is policy-blocked — is a permanent failure the ENOENT/EACCES
+    // check cannot see. Without this guard it would respawn forever and repaint
+    // the terminal every few minutes, right through a demo. A helper that ever
+    // stays up for STABLE_HELPER_RESET_MS resets restartAttempt, so this only
+    // trips on genuinely-never-stable helpers.
+    if (this.restartAttempt >= MAX_UNSTABLE_RESTARTS) {
+      this.desired = false;
+      this.restartAttempt = 0;
+      this.publish({
+        enabled: true,
+        active: false,
+        strategy: "unavailable",
+        restartAttempt: 0,
+        message: `${message} The sleep-inhibition helper keeps exiting immediately (often a managed-device security policy). Omnibus will continue without it; permit the platform helper, then restart Omnibus.`,
+      });
+      return;
+    }
     this.restartAttempt += 1;
     const cap = Math.min(this.restartMaxMs, this.restartBaseMs * 2 ** Math.min(this.restartAttempt - 1, 10));
     // Deterministic, bounded spread avoids a thundering herd after a shared

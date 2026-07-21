@@ -316,14 +316,21 @@ export async function runPreCommitCheck(options: PreCommitCheckOptions): Promise
     const allFixable = check.violations.every(violation => violation.fixable);
     if (options.fix && allFixable) {
       // The correction derives from the STAGED blob, so it may be written
-      // only when the working-tree copy still matches it byte-for-byte —
-      // otherwise --fix would silently overwrite edits made after staging.
-      const workingMatchesStaged = await workingTreeMatches(cwd, file, shown.stdout);
+      // only when the working-tree copy still matches it — otherwise --fix
+      // would silently overwrite edits made after staging. The comparison
+      // ignores line-ending style: with Git for Windows' default
+      // core.autocrlf=true the staged blob is LF-normalized while the working
+      // tree is CRLF, and a byte-exact check would reject every fix on Windows
+      // with unfollowable advice. The corrected text is then re-emitted in the
+      // working tree's own dominant EOL so the fix doesn't flip line endings.
+      const workingText = await readWorkingTreeFile(cwd, file);
+      const workingMatchesStaged = workingText !== null && normalizeEol(workingText) === normalizeEol(shown.stdout);
       if (!workingMatchesStaged) {
         lines.push(`SKIPPED FIX ${file}: the working-tree copy differs from the staged copy; apply the correction manually or re-stage first.`);
       } else {
         const corrected = options.registry.autoCorrect(shown.stdout);
-        if (corrected.applied > 0 && (await writeWorkingTreeFile(cwd, file, corrected.text))) {
+        const withWorkingEol = matchDominantEol(corrected.text, workingText!);
+        if (corrected.applied > 0 && (await writeWorkingTreeFile(cwd, file, withWorkingEol))) {
           fixedFiles.push(file);
           lines.push(`FIXED ${file}: ${corrected.applied} auto-correction(s) written to the working tree. Review the change, then re-stage the file.`);
           continue;
@@ -435,16 +442,29 @@ async function writeWorkingTreeFile(workspacePath: string, file: string, text: s
   }
 }
 
-/** True when the working-tree copy of a staged file equals the staged blob. */
-async function workingTreeMatches(workspacePath: string, file: string, stagedText: string): Promise<boolean> {
+/** Reads a staged file's working-tree copy, path-traversal guarded. */
+async function readWorkingTreeFile(workspacePath: string, file: string): Promise<string | null> {
   const root = path.resolve(workspacePath);
   const absolute = path.resolve(root, file);
-  if (absolute !== root && !absolute.startsWith(root + path.sep)) return false;
+  if (absolute !== root && !absolute.startsWith(root + path.sep)) return null;
   try {
-    return (await readFile(absolute, "utf8")) === stagedText;
+    return await readFile(absolute, "utf8");
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Line-ending-agnostic comparison so core.autocrlf does not defeat --fix. */
+function normalizeEol(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
+/** Re-emits corrected text in the working file's dominant EOL (CRLF vs LF). */
+function matchDominantEol(text: string, reference: string): string {
+  const crlf = (reference.match(/\r\n/g) ?? []).length;
+  const lf = (reference.match(/(?<!\r)\n/g) ?? []).length;
+  const lfOnly = text.replace(/\r\n/g, "\n");
+  return crlf > lf ? lfOnly.replace(/\n/g, "\r\n") : lfOnly;
 }
 
 async function isDirectory(target: string): Promise<boolean> {
@@ -500,23 +520,33 @@ const defaultRunCommand: RunCommand = (command, args, options) =>
       clearTimeout(timer);
       resolve({ ok, stdout, stderr, ...(exitCode === undefined ? {} : { exitCode }) });
     };
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    // windowsHide + a spawn guard match the repo's Windows convention: a hook
+    // running with no attached console must not flash a window, and a
+    // synchronous spawn throw (EINVAL/ENOENT) becomes a clean fail-open miss.
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, {
+        cwd: options.cwd,
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      resolve({ ok: false, stdout: "", stderr: "" });
+      return;
+    }
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish(false);
     }, Math.max(1, options.timeoutMs));
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       // Capture is capped just above the blob limit: an oversized staged
       // file still measures as oversized and is skipped, without buffering
       // the whole blob in memory.
       stdoutBytes += chunk.length;
       if (stdoutBytes <= MAX_CAPTURED_STDOUT_BYTES) stdout += chunk.toString("utf8");
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       if (stderr.length < 8_192) stderr += chunk.toString("utf8");
     });
     child.on("error", () => finish(false));

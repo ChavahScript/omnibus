@@ -122,9 +122,9 @@ export async function startBridge(config: AppConfig): Promise<RunningBridge> {
     };
     process.once("SIGINT", () => void shutdown());
     process.once("SIGTERM", () => void shutdown());
-    // Closing a terminal on macOS/Linux often delivers SIGHUP rather than an
-    // interactive Ctrl+C. Release the tunnel and sleep lease cleanly there as
-    // well; Windows simply never emits this signal for ordinary consoles.
+    // Closing a terminal delivers SIGHUP on macOS/Linux, and Node synthesizes
+    // SIGHUP on Windows console-window close (with a short OS deadline), so
+    // registering it releases the tunnel and sleep lease cleanly on all three.
     process.once("SIGHUP", () => void shutdown());
     return { bridge, tunnel, close };
   } catch (error) {

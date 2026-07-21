@@ -32,7 +32,7 @@ import {
   type PullProgress,
 } from "./local-intelligence.js";
 import { HomeFleetWorker, parseSerializedJoinInvitation, type HomeFleetEndpoint, type HomeFleetWorkerPrivateState } from "./home-fleet.js";
-import { selectPrivateLanHost } from "./home-fleet-service.js";
+import { restrictToCurrentUserOnWindows, selectPrivateLanHost } from "./home-fleet-service.js";
 import { KeepAwakeController } from "./keep-awake.js";
 import { AntiPatternRegistry } from "./second-brain/anti-patterns.js";
 import { HippoRagRetriever } from "./second-brain/hipporag.js";
@@ -588,6 +588,7 @@ async function runWorkerWhileAwake(
     for (const line of workerIdentityLines(label, !options.workerLabel && !saved)) console.log(line);
     await persistWorkerPairingNow();
     console.log(`Private worker listener: ${endpoint.url}`);
+    for (const line of firewallHintLines()) console.log(line);
     console.log(modelReady
       ? "Fixed local peer-review model is ready. Keep this terminal open while the laptop contributes reviews."
       : "Fixed local peer-review model is missing. This worker is paired but will stay inactive until it is explicitly prepared and restarted.");
@@ -952,6 +953,9 @@ async function writeWorkerRuntimeState(statePath: string, state: WorkerRuntimeSt
     await rename(temporary, destination);
     committed = true;
     await chmod(destination, 0o600);
+    // Holds the worker's derived coordinator secret; tighten the ACL on
+    // Windows where chmod alone does not restrict other users.
+    await restrictToCurrentUserOnWindows(destination);
   } finally {
     if (!committed) await rm(temporary, { force: true }).catch(() => undefined);
   }
@@ -986,6 +990,24 @@ export function workerIdentityLines(label: string, usedDefaultCallsign: boolean)
   const lines = [`Fleet Setup shows this laptop as "${label}".`];
   if (usedDefaultCallsign) lines.push('Rename it any time: omnibus-bridge worker --label "Kitchen MacBook"');
   return lines;
+}
+
+/**
+ * The worker's inbound LAN listener is the one place a host firewall can
+ * silently break the fleet: outbound heartbeats keep succeeding, so the phone
+ * shows the laptop as paired while every coordinator→worker review is dropped
+ * with nothing in the terminal to explain it. On Windows the first non-loopback
+ * bind raises Defender's consent dialog; name the exact remedy.
+ */
+export function firewallHintLines(platform: NodeJS.Platform = process.platform): string[] {
+  if (platform === "win32") {
+    return [
+      "If Windows Firewall asks, click Allow for node.exe on Private networks — and make sure this laptop's Wi-Fi is set to a Private (not Public) network, or the coordinator cannot reach this worker.",
+    ];
+  }
+  return [
+    "If your OS or firewall asks, allow this listener on your private/home network only — never on a public or guest network.",
+  ];
 }
 
 /**
@@ -1219,13 +1241,27 @@ export async function inspectStorage(config: Pick<AppConfig, "auditPath" | "stat
   } catch {
     for (const target of [config.auditPath, config.statePath]) {
       const existing = await nearestExistingPath(target);
-      try {
-        await access(existing, fsConstants.W_OK);
-      } catch {
-        return { ready: false, blockedBy: existing };
-      }
+      if (!(await canWriteInto(existing))) return { ready: false, blockedBy: existing };
     }
     return { ready: false };
+  }
+}
+
+/**
+ * A real write attempt, not fs.access(W_OK): on Windows the latter reflects
+ * only the read-only attribute and never evaluates NTFS ACLs, so an
+ * ACL-denied directory (C:\Program Files, a corporate-locked folder) would
+ * pass the check and then fail at setup's first mkdir — exactly the false
+ * "will be created" promise doctor exists to avoid.
+ */
+async function canWriteInto(directory: string): Promise<boolean> {
+  const probe = path.join(directory, `.omnibus-write-probe-${randomUUID()}`);
+  try {
+    await writeFile(probe, "", { flag: "wx" });
+    await rm(probe, { force: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

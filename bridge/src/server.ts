@@ -393,8 +393,15 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
     broadcast,
     listen: async () => {
       const homeFleetStart = await homeFleet.start();
-      if (homeFleetStart.available) logger.info({ port: config.homeFleetCoordinatorPort }, "Home Fleet listening on private LAN");
-      else logger.info("Home Fleet unavailable; ordinary local bridge remains ready");
+      if (homeFleetStart.available) {
+        logger.info({ port: config.homeFleetCoordinatorPort }, "Home Fleet listening on private LAN");
+        if (process.platform === "win32") {
+          // The coordinator's registration listener triggers the same Windows
+          // firewall prompt as a worker; without an Allow on Private, invited
+          // laptops cannot register even though pairing looks successful.
+          logger.info("If Windows Firewall asks, allow node.exe on Private networks so home laptops can join.");
+        }
+      } else logger.info("Home Fleet unavailable; ordinary local bridge remains ready");
       try {
         await brain.start();
         if (brain.enabled) logger.info("Second Brain is capturing ambient project knowledge locally");

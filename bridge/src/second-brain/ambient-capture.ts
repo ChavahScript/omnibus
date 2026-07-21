@@ -63,7 +63,11 @@ const DISCUSSION_BOUNDS: Record<"idea" | "brief" | "peer-review", number> = {
 
 const BUGFIX_SUBJECT = /\b(fix|bug|regress|hotfix|revert)/i;
 const DIAGNOSTIC_LINE = /(error|warning)\s*(TS\d+|E\d{2,4}|C\d{3,4}|\[.+?\])?\s*[:.]/i;
-const DIAGNOSTIC_FILE = /^([\w@./\\-]+\.[A-Za-z0-9]{1,8})(?=[(:\s])/;
+// An optional Windows drive prefix (C:\...) is matched explicitly; the rest of
+// the class excludes ':' so the trailing "(12):" line/column suffix is not
+// swallowed. Without the prefix, MSVC/clang-cl diagnostics would misattribute
+// every file to the generic "workspace" subject on Windows.
+const DIAGNOSTIC_FILE = /^((?:[A-Za-z]:)?[\w@./\\-]+\.[A-Za-z0-9]{1,8})(?=[(:\s])/;
 
 const TripleSchema = z.object({
   subject: z.string().min(1).max(240),
@@ -447,7 +451,15 @@ export class AmbientCaptureService implements AmbientCaptureApi {
       const tokens = command.split(/\s+/).filter(Boolean);
       const executable = tokens[0];
       if (!executable) return;
-      const result = await this.runCommand(executable, tokens.slice(1), {
+      // The tools an owner actually configures here (tsc, eslint, npm) install
+      // as .cmd shims on Windows, which libuv's shell-less spawn cannot resolve
+      // — it only tries the bare name and name.exe. Route the owner-trusted,
+      // already-split command through cmd.exe on Windows so the documented
+      // example works; no new trust surface, since the command is owner config.
+      const invocation = process.platform === "win32"
+        ? { command: process.env.COMSPEC || "cmd.exe", args: ["/d", "/s", "/c", command] }
+        : { command: executable, args: tokens.slice(1) };
+      const result = await this.runCommand(invocation.command, invocation.args, {
         cwd: this.workspacePath,
         timeoutMs: DIAGNOSTICS_TIMEOUT_MS,
       });

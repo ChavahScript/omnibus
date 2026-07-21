@@ -120,7 +120,16 @@ export type HomeFleetSnapshot = z.infer<typeof HomeFleetSnapshotSchema>;
 /** The invitation is transient and travels only on the authenticated phone socket. */
 export const HomeFleetInviteSchema = z.object({
   correlationId: z.string().uuid(),
+  /** The macOS / Linux / Git-Bash form: paste as-is into a POSIX shell. */
   command: z.string().min(1).max(8_000),
+  /**
+   * The Windows form. On a stock Windows client PowerShell resolves `npx` to
+   * `npx.ps1`, which the default Restricted execution policy blocks, so the
+   * bare command fails on camera. Wrapping it in `cmd /c` routes to `npx.cmd`
+   * and is immune to execution policy. Optional so older phone builds that
+   * only render `command` keep working.
+   */
+  commandWindows: z.string().min(1).max(8_100).optional(),
   expiresAt: z.string().datetime(),
 });
 export type HomeFleetInvite = z.infer<typeof HomeFleetInviteSchema>;

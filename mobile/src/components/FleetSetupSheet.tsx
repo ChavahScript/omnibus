@@ -393,10 +393,16 @@ function HomeFleetConfiguration({
   // or a coordinator restart. The coordinator refuses a *new* worker at the
   // limit, so leaving this action available cannot expand the fleet silently.
   const canInvite = homeFleet.available && !busy;
+  // A Windows home laptop needs the cmd-wrapped form: stock PowerShell blocks
+  // npm's npx.ps1 shim under its default execution policy. The toggle only
+  // appears when the paired bridge is new enough to supply it.
+  const [invitePlatform, setInvitePlatform] = useState<"unix" | "windows">("unix");
+  const windowsCommand = invite?.commandWindows;
+  const shownCommand = invitePlatform === "windows" && windowsCommand ? windowsCommand : invite?.command ?? "";
   const copyInvite = async () => {
-    if (!invite) return;
+    if (!shownCommand) return;
     try {
-      await Clipboard.setStringAsync(invite.command);
+      await Clipboard.setStringAsync(shownCommand);
       setCopyError(false);
       setCopied(true);
       setTimeout(() => setCopied(false), 1_800);
@@ -429,8 +435,22 @@ function HomeFleetConfiguration({
       {atWorkerLimit ? <Text style={styles.homeFleetSafety}>The fleet is full. This re-pair command can reconnect an existing home laptop after a network change; remove a home laptop before adding a new one.</Text> : null}
       {invite ? <View style={styles.inviteCard}>
         <View style={styles.inviteHeader}><Text style={styles.inviteLabel}>ONE-TIME HOME LAPTOP COMMAND</Text><Text style={styles.inviteExpiry}>EXPIRES {readableExpiry(invite.expiresAt)}</Text></View>
-        <Text selectable numberOfLines={4} style={styles.inviteCommand}>{invite.command}</Text>
-        <Text style={styles.inviteNote}>Copy this into Terminal or Windows PowerShell on one spare laptop you control, while both laptops are on this same private network.</Text>
+        {windowsCommand ? <View style={styles.invitePlatformRow}>
+          {(["unix", "windows"] as const).map(option => <Pressable
+            key={option}
+            onPress={() => { playOfficeHaptic("RotaryRumble", 140); setInvitePlatform(option); }}
+            style={({ pressed }) => [styles.invitePlatformTab, invitePlatform === option && styles.invitePlatformTabActive, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: invitePlatform === option }}
+            accessibilityLabel={option === "unix" ? "macOS or Linux command" : "Windows command"}
+          >
+            <Text style={[styles.invitePlatformText, invitePlatform === option && styles.invitePlatformTextActive]}>{option === "unix" ? "MAC / LINUX" : "WINDOWS"}</Text>
+          </Pressable>)}
+        </View> : null}
+        <Text selectable numberOfLines={4} style={styles.inviteCommand}>{shownCommand}</Text>
+        <Text style={styles.inviteNote}>{invitePlatform === "windows"
+          ? "Paste into PowerShell or Command Prompt on one spare Windows laptop you control, on this same private network."
+          : "Paste into Terminal on one spare Mac or Linux laptop you control, on this same private network."}</Text>
         <Pressable onPress={() => { void copyInvite(); }} style={({ pressed }) => [styles.copyInvite, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Copy home laptop command">
           <VectorIcon name="copy" size={15} color={colors.ink} /><Text style={styles.copyInviteText}>{copied ? "COPIED" : copyError ? "COPY UNAVAILABLE" : "COPY COMMAND"}</Text>
         </Pressable>
@@ -613,6 +633,11 @@ const styles = StyleSheet.create({
   inviteHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   inviteLabel: { flexShrink: 1, color: colors.paper, fontSize: 8, letterSpacing: 0.92, fontWeight: "900" },
   inviteExpiry: { color: colors.paperMuted, fontSize: 7, letterSpacing: 0.66, fontWeight: "900" },
+  invitePlatformRow: { flexDirection: "row", gap: 6, marginTop: 11 },
+  invitePlatformTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9, borderWidth: 1, borderColor: colors.line },
+  invitePlatformTabActive: { backgroundColor: colors.paper, borderColor: colors.paper },
+  invitePlatformText: { color: colors.paperMuted, fontSize: 9, letterSpacing: 0.7, fontWeight: "800" },
+  invitePlatformTextActive: { color: colors.ink },
   inviteCommand: { color: colors.paper, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }), fontSize: 9, lineHeight: 14, marginTop: 10 },
   inviteNote: { color: colors.paperMuted, fontSize: 10, lineHeight: 15, marginTop: 9 },
   copyInvite: { minHeight: 38, paddingHorizontal: 12, marginTop: 11, gap: 7, alignSelf: "flex-start", alignItems: "center", justifyContent: "center", flexDirection: "row", borderRadius: 11, backgroundColor: colors.paper },

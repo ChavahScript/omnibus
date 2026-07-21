@@ -104,6 +104,10 @@ test("the owner can invite the next laptop immediately after a worker consumes t
 
     const first = await service.issueInvite(randomUUID());
     assert.match(first.command, /worker --join/);
+    // The Windows form wraps the same command in `cmd /c` so PowerShell's
+    // default execution policy cannot block npm's npx.ps1 shim on camera.
+    assert.ok(first.commandWindows, "invite should carry a Windows command form");
+    assert.match(first.commandWindows!, /^cmd \/c "npx --yes omnibus-bridge@.* worker --join .* --pull-models"$/);
 
     // While the one-time token is still pending, a second invite is refused.
     await assert.rejects(
@@ -228,4 +232,15 @@ test("each laptop keeps its review lens when cache warmth reorders dispatch", as
     await service.close();
     await rm(statePath, { recursive: true, force: true });
   }
+});
+
+test("interfacePriority ranks real NICs ahead of Windows virtual/VPN adapters", async () => {
+  const { interfacePriority } = await import("./home-fleet-service.js");
+  assert.ok(interfacePriority("Wi-Fi") < interfacePriority("vEthernet (Default Switch)"));
+  assert.ok(interfacePriority("Ethernet") < interfacePriority("VMware Network Adapter VMnet8"));
+  assert.ok(interfacePriority("en0") < interfacePriority("utun3"));
+  assert.ok(interfacePriority("Ethernet") < interfacePriority("Tailscale"));
+  assert.equal(interfacePriority("OpenVPN TAP-Windows6"), 2);
+  assert.equal(interfacePriority("Wi-Fi"), 0);
+  assert.equal(interfacePriority("Ethernet 2"), 0);
 });

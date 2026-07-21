@@ -275,3 +275,14 @@ test("worker validates pairing preconditions before engaging keep-awake", async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("firewall hint names the exact Windows remedy and stays generic elsewhere", async () => {
+  const { firewallHintLines } = await import("./cli.js");
+  const win = firewallHintLines("win32").join(" ");
+  assert.match(win, /Windows Firewall/);
+  assert.match(win, /node\.exe/);
+  assert.match(win, /Private/);
+  const mac = firewallHintLines("darwin").join(" ");
+  assert.doesNotMatch(mac, /Windows/);
+  assert.match(mac, /private/i);
+});
