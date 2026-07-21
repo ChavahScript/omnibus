@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
 import { BlurMask, Canvas, Circle, Group, Line, RoundedRect, vec } from "@shopify/react-native-skia";
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { colors, springs } from "../theme";
 import type { BrainStatus } from "../types";
 
@@ -283,7 +283,10 @@ export function OmnibusSplash({ onComplete }: SplashProps): React.JSX.Element {
   const phoneOpacity = useSharedValue(0);
 
   useEffect(() => {
-    phoneScale.value = withSpring(1, springs.entrance);
+    // A critically damped entrance (no overshoot past 1.0). The graphic is a
+    // Skia texture; any parent scale above 1.0 up-samples that texture and
+    // softens the whole graphic, so the entrance only ever eases up to 1.0.
+    phoneScale.value = withSpring(1, { damping: 24, stiffness: 150, mass: 0.9 });
     phoneOpacity.value = withSpring(1, springs.entrance);
     const completeTimer = setTimeout(onComplete, 1_850);
     return () => clearTimeout(completeTimer);
@@ -300,25 +303,22 @@ export function OmnibusSplash({ onComplete }: SplashProps): React.JSX.Element {
         <RoundedRect x={67} y={39} width={122} height={177} r={18} color="#111112" />
         <RoundedRect x={103} y={29} width={50} height={5} r={3} color="rgba(244,244,240,0.38)" />
       </Canvas>
-      <View style={styles.splashWorkers}>
-        {SPLASH_WORKERS.map(worker => <SplashWorker key={worker.id} {...worker} />)}
-      </View>
+      {/* The dots are Skia, not scaled Views: iOS does not anti-alias a layer's
+          edges while a scale transform is active, so a rounded View reads soft
+          the whole time it animates in. Skia re-rasterizes vector geometry
+          every frame at native resolution, crisp at any scale. The canvas is
+          inset by DOT_MARGIN so a dot flying in from off the phone is not
+          clipped by the canvas bounds. */}
+      <Canvas style={styles.splashDots}>
+        {SPLASH_WORKERS.map(worker => <SplashDot key={worker.id} {...worker} />)}
+      </Canvas>
     </Animated.View>
   </View>;
 }
 
-// The dot is drawn at OVERSAMPLE× its displayed size and only ever scaled
-// DOWN. iOS rasterizes a view's rounded corner and border at its model bounds
-// and GPU-scales that raster to apply a transform, so an entrance that scales
-// toward (and, on the underdamped spring, briefly past) 1.0 up-samples that
-// tiny raster and looks soft until the spring settles. Rendering at 2× keeps
-// the layer's raster always down-sampled — crisp through the whole arrival.
-const WORKER_OVERSAMPLE = 2;
-// The oversized box is centered on its old visual position by shifting each
-// translate back by half the extra size, so geometry is pixel-identical.
-const WORKER_CENTER_OFFSET = (26 * (WORKER_OVERSAMPLE - 1)) / 2;
+const DOT_MARGIN = 56;
 
-function SplashWorker({ fromX, fromY, toX, toY, delay }: SplashWorkerPath): React.JSX.Element {
+function SplashDot({ fromX, fromY, toX, toY, delay }: SplashWorkerPath): React.JSX.Element {
   const progress = useSharedValue(0);
   useEffect(() => {
     progress.value = 0;
@@ -327,17 +327,19 @@ function SplashWorker({ fromX, fromY, toX, toY, delay }: SplashWorkerPath): Reac
     }, delay);
     return () => clearTimeout(startTimer);
   }, [delay, progress]);
-  const style = useAnimatedStyle(() => ({
-    opacity: 0.28 + progress.value * 0.72,
-    transform: [
-      { translateX: fromX + (toX - fromX) * progress.value - WORKER_CENTER_OFFSET },
-      { translateY: fromY + (toY - fromY) * progress.value - WORKER_CENTER_OFFSET },
-      // Displayed scale (0.64 → 1.0) divided by the oversample factor, so the
-      // 2× raster resolves to the same on-screen size while staying downscaled.
-      { scale: (0.64 + progress.value * 0.36) / WORKER_OVERSAMPLE },
-    ],
-  }));
-  return <Animated.View style={[styles.worker, style]} />;
+  // The coordinates are a 26 px head's top-left; the Skia circle uses its
+  // center (+13), shifted into the inset canvas (+DOT_MARGIN). Radius and
+  // opacity animate exactly as the old View did (13 px at full scale, a 3 px
+  // ink ring around a paper core).
+  const cx = useDerivedValue(() => fromX + 13 + DOT_MARGIN + (toX - fromX) * progress.value);
+  const cy = useDerivedValue(() => fromY + 13 + DOT_MARGIN + (toY - fromY) * progress.value);
+  const rOuter = useDerivedValue(() => 13 * (0.64 + progress.value * 0.36));
+  const rInner = useDerivedValue(() => 10 * (0.64 + progress.value * 0.36));
+  const opacity = useDerivedValue(() => 0.28 + progress.value * 0.72);
+  return <Group opacity={opacity}>
+    <Circle cx={cx} cy={cy} r={rOuter} color={colors.ink} />
+    <Circle cx={cx} cy={cy} r={rInner} color={colors.paper} />
+  </Group>;
 }
 
 const styles = StyleSheet.create({
@@ -346,8 +348,7 @@ const styles = StyleSheet.create({
   particle: { position: "absolute", left: 0, top: 0 },
   splash: { flex: 1, backgroundColor: colors.void, alignItems: "center", justifyContent: "center" },
   splashGraphic: { width: 256, height: 264, position: "relative" },
-  splashWorkers: { position: "absolute", left: 0, top: 0, width: 256, height: 264 },
-  // Drawn at 2× (52 px, 6 px border) and scaled down in SplashWorker so the
-  // rounded border stays crisp through the entrance instead of up-sampling.
-  worker: { position: "absolute", left: 0, top: 0, width: 52, height: 52, borderRadius: 26, backgroundColor: colors.paper, borderWidth: 6, borderColor: colors.ink },
+  // Inset by DOT_MARGIN (56) on every side so a dot arriving from off the
+  // phone graphic is not clipped by the Skia canvas bounds: 256+112 × 264+112.
+  splashDots: { position: "absolute", left: -56, top: -56, width: 368, height: 376 },
 });
