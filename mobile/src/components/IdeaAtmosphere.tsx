@@ -206,6 +206,17 @@ export function OmnibusSplash({ onComplete }: SplashProps): React.JSX.Element {
   </View>;
 }
 
+// The dot is drawn at OVERSAMPLE× its displayed size and only ever scaled
+// DOWN. iOS rasterizes a view's rounded corner and border at its model bounds
+// and GPU-scales that raster to apply a transform, so an entrance that scales
+// toward (and, on the underdamped spring, briefly past) 1.0 up-samples that
+// tiny raster and looks soft until the spring settles. Rendering at 2× keeps
+// the layer's raster always down-sampled — crisp through the whole arrival.
+const WORKER_OVERSAMPLE = 2;
+// The oversized box is centered on its old visual position by shifting each
+// translate back by half the extra size, so geometry is pixel-identical.
+const WORKER_CENTER_OFFSET = (26 * (WORKER_OVERSAMPLE - 1)) / 2;
+
 function SplashWorker({ fromX, fromY, toX, toY, delay }: SplashWorkerPath): React.JSX.Element {
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -218,9 +229,11 @@ function SplashWorker({ fromX, fromY, toX, toY, delay }: SplashWorkerPath): Reac
   const style = useAnimatedStyle(() => ({
     opacity: 0.28 + progress.value * 0.72,
     transform: [
-      { translateX: fromX + (toX - fromX) * progress.value },
-      { translateY: fromY + (toY - fromY) * progress.value },
-      { scale: 0.64 + progress.value * 0.36 },
+      { translateX: fromX + (toX - fromX) * progress.value - WORKER_CENTER_OFFSET },
+      { translateY: fromY + (toY - fromY) * progress.value - WORKER_CENTER_OFFSET },
+      // Displayed scale (0.64 → 1.0) divided by the oversample factor, so the
+      // 2× raster resolves to the same on-screen size while staying downscaled.
+      { scale: (0.64 + progress.value * 0.36) / WORKER_OVERSAMPLE },
     ],
   }));
   return <Animated.View style={[styles.worker, style]} />;
@@ -233,5 +246,7 @@ const styles = StyleSheet.create({
   splash: { flex: 1, backgroundColor: colors.void, alignItems: "center", justifyContent: "center" },
   splashGraphic: { width: 256, height: 264, position: "relative" },
   splashWorkers: { position: "absolute", left: 0, top: 0, width: 256, height: 264 },
-  worker: { position: "absolute", left: 0, top: 0, width: 26, height: 26, borderRadius: 13, backgroundColor: colors.paper, borderWidth: 3, borderColor: colors.ink },
+  // Drawn at 2× (52 px, 6 px border) and scaled down in SplashWorker so the
+  // rounded border stays crisp through the entrance instead of up-sampling.
+  worker: { position: "absolute", left: 0, top: 0, width: 52, height: 52, borderRadius: 26, backgroundColor: colors.paper, borderWidth: 6, borderColor: colors.ink },
 });
