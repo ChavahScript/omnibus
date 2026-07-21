@@ -64,3 +64,14 @@ And the part we're weirdly proudest of: **peer-to-peer prefix caching**. With an
 - **True KV-tensor transfer:** swap the prompt-prefix cache for raw KV pages over the same ticketed P2P path via a vLLM/LMCache backend.
 - **Android client** and richer approval gates for every action that touches the workspace or the network.
 - **Graph time-travel UI:** scrub the knowledge graph's transaction timeline from the phone — watch a decision get made, contradicted, and superseded.
+
+---
+
+## Built with (Devpost tags)
+
+`typescript` `node.js` `react-native` `expo` `swift` `ollama` `express` `websocket` `zod` `ios` `xcode` `fastlane` `skia` `reanimated` `corehaptics` `hmac` `sha-256` `knowledge-graph` `hipporag` `pagerank` `p2p` `localtunnel` `npm` `brave-search` `remotion`
+
+## Try it out
+
+- **Code:** https://github.com/ChavahScript/omnibus
+- **Install (bridge, npm):** https://www.npmjs.com/package/omnibus-bridge — `npm i -g omnibus-bridge && omnibus-bridge setup --install-runtime --pull-models && omnibus-bridge start`
