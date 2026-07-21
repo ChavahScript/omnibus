@@ -1,0 +1,25 @@
+{
+  "Version": 1.0,
+  "Pattern": [
+    {
+      "Event": {
+        "Time": 0.0,
+        "EventType": "HapticTransient",
+        "EventParameters": [
+          { "ParameterID": "HapticIntensity", "ParameterValue": 0.95 },
+          { "ParameterID": "HapticSharpness", "ParameterValue": 0.42 }
+        ]
+      }
+    },
+    {
+      "Event": {
+        "Time": 0.065,
+        "EventType": "HapticTransient",
+        "EventParameters": [
+          { "ParameterID": "HapticIntensity", "ParameterValue": 0.48 },
+          { "ParameterID": "HapticSharpness", "ParameterValue": 0.18 }
+        ]
+      }
+    }
+  ]
+}

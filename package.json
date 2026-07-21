@@ -1,0 +1,29 @@
+{
+  "name": "ceo-office",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "bridge",
+    "mobile"
+  ],
+  "scripts": {
+    "bridge:dev": "npm --workspace bridge run dev",
+    "bridge:build": "npm --workspace bridge run build",
+    "bridge:test": "npm --workspace bridge run test",
+    "mobile:start": "npm --workspace mobile run start",
+    "mobile:ios": "npm --workspace mobile run ios",
+    "mobile:prebuild": "npm --workspace mobile run prebuild -- --platform ios --no-install",
+    "mobile:native-sync": "npm --workspace mobile run native:sync",
+    "mobile:pods": "npm --workspace mobile run ios:pods",
+    "mobile:verify": "npm --workspace mobile run ios:verify",
+    "mobile:archive": "npm --workspace mobile run ios:archive",
+    "mobile:testflight:check": "npm --workspace mobile run ios:testflight:check",
+    "mobile:testflight": "npm --workspace mobile run ios:testflight"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10"
+  }
+}

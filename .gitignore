@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.env
+.DS_Store
+.ceo-office/
+# Runtime bridge state: audit trails, queue, HMAC pairing secrets, brain graph.
+.omnibus/
+mobile/ios/Pods/
+mobile/ios/build/
+mobile/android/.gradle/
+*.xcworkspace/xcuserdata/
+mobile/fastlane/.env
+mobile/fastlane/*.p8
+mobile/artifacts/
+mobile/fastlane/test_output/
+mobile/fastlane/README.md
+mobile/fastlane/report.xml
+*.xcarchive/

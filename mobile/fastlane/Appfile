@@ -1,0 +1,8 @@
+# Fastlane reads this when a lane does not receive an explicit identifier.
+# Keep the default aligned with app.json until the owner selects their final,
+# unique App ID. The real value belongs in fastlane/.env and is never committed.
+app_identifier(ENV.fetch("APP_IDENTIFIER", "com.app.omnibus"))
+
+# Xcode signing needs the Developer Program team ID, but Fastlane should still
+# be able to list and validate lanes before the owner has configured signing.
+team_id(ENV["APPLE_TEAM_ID"]) if ENV["APPLE_TEAM_ID"] && !ENV["APPLE_TEAM_ID"].empty?

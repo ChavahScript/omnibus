@@ -1,0 +1,68 @@
+{
+  "name": "omnibus-bridge",
+  "private": false,
+  "version": "0.2.0",
+  "description": "Local-first multi-agent ideation bridge for Omnibus.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": "./dist/cli.js"
+  },
+  "bin": {
+    "omnibus-bridge": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    ".env.example"
+  ],
+  "keywords": [
+    "omnibus",
+    "ollama",
+    "local-llm",
+    "multi-agent",
+    "developer-tools"
+  ],
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli.ts start",
+    "start": "node dist/cli.js start",
+    "setup": "node dist/cli.js setup",
+    "doctor": "node dist/cli.js doctor",
+    "prebuild": "node scripts/clean-dist.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test src/*.test.ts src/agents/*.test.ts src/second-brain/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@mastra/core": "^1.32.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "localtunnel": "^2.0.2",
+    "openai": "^5.20.0",
+    "pino": "^9.7.0",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.21",
+    "@types/qrcode-terminal": "^0.12.2",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

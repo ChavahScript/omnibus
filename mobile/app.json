@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Omnibus",
+    "slug": "omnibus",
+    "scheme": "omnibus",
+    "version": "1.0.0",
+    "icon": "./assets/app-icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.app.omnibus",
+      "buildNumber": "1",
+      "usesAppleSignIn": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Omnibus uses the camera only to scan the bridge pairing QR code."
+      }
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-apple-authentication",
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ],
+      "./plugins/withFmtConstevalFix"
+    ],
+    "newArchEnabled": true
+  }
+}

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    Omnibus: a phone with a small working group gathered around it.  The
+    monochrome geometry stays legible in iOS's rounded-square mask and avoids
+    decorative detail that collapses at notification/icon size.
+  -->
+  <rect width="1024" height="1024" rx="224" fill="#090909"/>
+  <rect x="90" y="90" width="844" height="844" rx="168" fill="none" stroke="#F4F4F0" stroke-opacity=".12" stroke-width="8"/>
+  <g fill="#F4F4F0">
+    <circle cx="314" cy="338" r="78"/>
+    <circle cx="710" cy="338" r="78"/>
+    <circle cx="282" cy="656" r="78"/>
+    <circle cx="742" cy="656" r="78"/>
+    <circle cx="512" cy="244" r="65"/>
+  </g>
+  <g fill="#090909" stroke="#F4F4F0" stroke-width="34" stroke-linejoin="round">
+    <rect x="356" y="218" width="312" height="590" rx="72"/>
+    <rect x="401" y="304" width="222" height="350" rx="28" fill="none" stroke-width="20" opacity=".84"/>
+    <path d="M465 724h94" stroke-width="24" stroke-linecap="round"/>
+  </g>
+</svg>
