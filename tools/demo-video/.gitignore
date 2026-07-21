@@ -1,0 +1,3 @@
+public/footage/*.mp4
+out/
+node_modules/
