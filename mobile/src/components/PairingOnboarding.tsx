@@ -8,7 +8,18 @@ import { LocalAppleProfile } from "../localData";
 import { colors, springs } from "../theme";
 import { VectorIcon } from "./VectorIcon";
 
-const BRIDGE_COMMAND = "npm install -g omnibus-bridge && omnibus-bridge setup --install-runtime --pull-models && omnibus-bridge start";
+/**
+ * One complete copyable command per platform. The Windows variant runs the
+ * same chain through `cmd /c`, matching the Home Fleet invite convention:
+ * it works in both Windows PowerShell 5.1 (which has no `&&`) and PowerShell 7,
+ * and resolves npm's .cmd shims without tripping the script-execution policy.
+ */
+const BRIDGE_COMMANDS = {
+  mac: "npm install -g omnibus-bridge && omnibus-bridge setup --install-runtime --pull-models && omnibus-bridge start",
+  windows: 'cmd /c "npm install -g omnibus-bridge && omnibus-bridge setup --install-runtime --pull-models && omnibus-bridge start"',
+} as const;
+
+type BridgeOS = keyof typeof BRIDGE_COMMANDS;
 
 type PairingOnboardingProps = {
   onScan: () => void;
@@ -97,6 +108,7 @@ export function PairingOnboarding({
   const opacity = useSharedValue(0);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const [bridgeOS, setBridgeOS] = useState<BridgeOS>("mac");
   const [appleAvailability, setAppleAvailability] = useState<"checking" | "available" | "unavailable">("checking");
   const [appleBusy, setAppleBusy] = useState(false);
   const [appleNotice, setAppleNotice] = useState<string | null>(null);
@@ -127,7 +139,7 @@ export function PairingOnboarding({
 
   const copyBridgeCommand = async () => {
     try {
-      await Clipboard.setStringAsync(BRIDGE_COMMAND);
+      await Clipboard.setStringAsync(BRIDGE_COMMANDS[bridgeOS]);
       setCopyFailed(false);
       setCopied(true);
       if (copyTimer.current) clearTimeout(copyTimer.current);
@@ -172,17 +184,32 @@ export function PairingOnboarding({
         <PairingBeacon />
         <Text style={styles.eyebrow}>OMNIBUS / LOCAL WORKING ROOM</Text>
         <Text style={styles.title}>Your group lives on your laptop.{"\n"}This is its quiet front door.</Text>
-        <Text style={styles.body}>Install the bridge on your Mac, let it prepare the local team, then scan its one-time pairing code. The phone stays a calm companion to the models and tools you choose on your laptop.</Text>
+        <Text style={styles.body}>Install the bridge on any Mac or Windows laptop, let it prepare the local team, then scan its one-time pairing code. The phone stays a calm companion to the models and tools you choose on your laptop.</Text>
+
+        <View style={styles.osToggle} accessibilityRole="tablist">
+          {(["mac", "windows"] as const).map(os => (
+            <Pressable
+              key={os}
+              onPress={() => { setBridgeOS(os); setCopied(false); }}
+              style={[styles.osTab, bridgeOS === os && styles.osTabActive]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: bridgeOS === os }}
+              accessibilityLabel={os === "mac" ? "Show macOS bridge command" : "Show Windows bridge command"}
+            >
+              <Text style={[styles.osTabText, bridgeOS === os && styles.osTabTextActive]}>{os === "mac" ? "MACOS" : "WINDOWS"}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <Pressable
           onPress={() => { void copyBridgeCommand(); }}
           style={({ pressed }) => [styles.commandCard, pressed && styles.commandCardPressed]}
           accessibilityRole="button"
-          accessibilityLabel="Copy Omnibus bridge install and setup command"
+          accessibilityLabel={bridgeOS === "mac" ? "Copy macOS bridge install and setup command" : "Copy Windows bridge install and setup command"}
         >
           <View style={styles.commandTextWrap}>
-            <Text style={styles.commandEyebrow}>MAC BRIDGE / INSTALL + START</Text>
-            <Text selectable style={styles.command}>{BRIDGE_COMMAND}</Text>
+            <Text style={styles.commandEyebrow}>{bridgeOS === "mac" ? "MAC BRIDGE / INSTALL + START" : "WINDOWS BRIDGE / INSTALL + START"}</Text>
+            <Text selectable style={styles.command}>{BRIDGE_COMMANDS[bridgeOS]}</Text>
           </View>
           <View style={styles.commandAction}>
             <VectorIcon name="copy" size={16} color={colors.ink} />
@@ -191,7 +218,7 @@ export function PairingOnboarding({
         </Pressable>
 
         <View style={styles.steps}>
-          <Step number="01" text="Copy the Mac setup command, then run it in Terminal" />
+          <Step number="01" text={bridgeOS === "mac" ? "Copy the setup command, then run it in Terminal" : "Copy the setup command, then run it in PowerShell"} />
           <Step number="02" text="Scan the terminal QR code with this phone" />
           <Step number="03" text="Shape an idea with your local working group" />
         </View>
@@ -341,7 +368,12 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.paperMuted, fontSize: 10, letterSpacing: 1.65, fontWeight: "800" },
   title: { color: colors.paper, fontSize: 31, fontWeight: "700", lineHeight: 38, letterSpacing: -0.75, marginTop: 13 },
   body: { color: colors.paperMuted, fontSize: 15, lineHeight: 23, marginTop: 18, maxWidth: 420 },
-  commandCard: { marginTop: 25, padding: 15, gap: 13, flexDirection: "row", alignItems: "center", borderRadius: 18, borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: colors.surfaceRaised },
+  osToggle: { marginTop: 25, flexDirection: "row", gap: 8 },
+  osTab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 11, borderWidth: 1, borderColor: colors.line },
+  osTabActive: { backgroundColor: colors.paper, borderColor: colors.paper },
+  osTabText: { color: colors.paperMuted, fontSize: 9, letterSpacing: 1.2, fontWeight: "900" },
+  osTabTextActive: { color: colors.ink },
+  commandCard: { marginTop: 12, padding: 15, gap: 13, flexDirection: "row", alignItems: "center", borderRadius: 18, borderWidth: 1, borderColor: colors.lineStrong, backgroundColor: colors.surfaceRaised },
   commandCardPressed: { opacity: 0.76, transform: [{ scale: 0.992 }] },
   commandTextWrap: { flex: 1, minWidth: 0 },
   commandEyebrow: { color: colors.paperMuted, fontSize: 9, letterSpacing: 1.2, fontWeight: "900" },

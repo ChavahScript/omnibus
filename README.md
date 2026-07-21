@@ -26,9 +26,7 @@ Locally-derived knowledge (workspace snippets, recalled facts, guardrails)
 reaches the two **local** executors — the loopback Ollama route and the on-host
 Codex CLI — but never the cloud Responses route.
 
-> The $100 limit was the team’s hackathon construction budget—not a feature
-> limit imposed on an Omnibus user. Runtime usage is now observational
-> telemetry only; local inference remains the normal path.
+
 
 ## What is implemented
 

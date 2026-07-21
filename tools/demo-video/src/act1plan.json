@@ -1,0 +1,1163 @@
+{
+ "captions": [
+  {
+   "in": 6.4,
+   "out": 8.07,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "THIS"
+    },
+    {
+     "t": "IS"
+    },
+    {
+     "t": "MY"
+    },
+    {
+     "t": "OLD"
+    },
+    {
+     "t": "HP.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 8.59,
+   "out": 9.73,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "IT"
+    },
+    {
+     "t": "LASTED"
+    },
+    {
+     "t": "ME"
+    },
+    {
+     "t": "ABOUT"
+    },
+    {
+     "t": "SIX",
+     "emph": true
+    },
+    {
+     "t": "YEARS",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 9.73,
+   "out": 10.61,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "BEFORE"
+    },
+    {
+     "t": "I"
+    },
+    {
+     "t": "REPLACED"
+    },
+    {
+     "t": "IT"
+    }
+   ]
+  },
+  {
+   "in": 10.61,
+   "out": 11.41,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "FOR"
+    },
+    {
+     "t": "BEING"
+    },
+    {
+     "t": "TOO"
+    },
+    {
+     "t": "SLOW"
+    }
+   ]
+  },
+  {
+   "in": 11.41,
+   "out": 13.55,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "AND"
+    },
+    {
+     "t": "SINCE"
+    },
+    {
+     "t": "THEN"
+    },
+    {
+     "t": "I'VE"
+    },
+    {
+     "t": "BEEN"
+    },
+    {
+     "t": "TOO"
+    },
+    {
+     "t": "GUILTY"
+    }
+   ]
+  },
+  {
+   "in": 13.55,
+   "out": 14.51,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "TO"
+    },
+    {
+     "t": "THROW"
+    },
+    {
+     "t": "IT"
+    },
+    {
+     "t": "AWAY."
+    }
+   ]
+  },
+  {
+   "in": 15.35,
+   "out": 16.61,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "MY"
+    },
+    {
+     "t": "COWORKERS"
+    },
+    {
+     "t": "TELL"
+    },
+    {
+     "t": "ME"
+    },
+    {
+     "t": "IT'S"
+    },
+    {
+     "t": "E-WASTE",
+     "emph": true
+    },
+    {
+     "t": "\u2014"
+    }
+   ]
+  },
+  {
+   "in": 16.61,
+   "out": 20.13,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "AND"
+    },
+    {
+     "t": "STATISTICALLY,"
+    },
+    {
+     "t": "THEY'D"
+    },
+    {
+     "t": "BE"
+    },
+    {
+     "t": "CORRECT."
+    }
+   ]
+  },
+  {
+   "in": 20.53,
+   "out": 22.15,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "YOU"
+    },
+    {
+     "t": "SEE,"
+    },
+    {
+     "t": "SITTING"
+    },
+    {
+     "t": "INSIDE"
+    },
+    {
+     "t": "THIS"
+    },
+    {
+     "t": "LAPTOP"
+    }
+   ]
+  },
+  {
+   "in": 22.15,
+   "out": 24.15,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "UNUSED"
+    },
+    {
+     "t": "ARE"
+    },
+    {
+     "t": "16",
+     "emph": true
+    },
+    {
+     "t": "GIGABYTES",
+     "emph": true
+    },
+    {
+     "t": "OF"
+    },
+    {
+     "t": "RAM,"
+    }
+   ]
+  },
+  {
+   "in": 24.45,
+   "out": 25.15,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "EIGHT",
+     "emph": true
+    },
+    {
+     "t": "CORES,",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 25.25,
+   "out": 25.85,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "SITTING"
+    },
+    {
+     "t": "IN"
+    },
+    {
+     "t": "A"
+    },
+    {
+     "t": "DRAWER",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 25.85,
+   "out": 26.83,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "DOING"
+    },
+    {
+     "t": "THE"
+    },
+    {
+     "t": "ONE"
+    },
+    {
+     "t": "THING"
+    }
+   ]
+  },
+  {
+   "in": 26.83,
+   "out": 27.89,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "COMPUTERS"
+    },
+    {
+     "t": "ARE"
+    },
+    {
+     "t": "WORST"
+    },
+    {
+     "t": "AT:"
+    }
+   ]
+  },
+  {
+   "in": 27.89,
+   "out": 29.49,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "LAYING"
+    },
+    {
+     "t": "AROUND"
+    },
+    {
+     "t": "IDLY.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 29.67,
+   "out": 30.57,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "THERE"
+    },
+    {
+     "t": "ARE"
+    },
+    {
+     "t": "NINE",
+     "emph": true
+    },
+    {
+     "t": "OF"
+    },
+    {
+     "t": "THESE"
+    }
+   ]
+  },
+  {
+   "in": 30.57,
+   "out": 31.41,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "IN"
+    },
+    {
+     "t": "THE"
+    },
+    {
+     "t": "AVERAGE"
+    },
+    {
+     "t": "HOUSE."
+    }
+   ]
+  },
+  {
+   "in": 31.41,
+   "out": 33.27,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "62",
+     "emph": true
+    },
+    {
+     "t": "MILLION",
+     "emph": true
+    },
+    {
+     "t": "TONS",
+     "emph": true
+    },
+    {
+     "t": "OF"
+    },
+    {
+     "t": "THIS"
+    }
+   ]
+  },
+  {
+   "in": 33.27,
+   "out": 34.25,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "GOING"
+    },
+    {
+     "t": "TO"
+    },
+    {
+     "t": "WASTE"
+    },
+    {
+     "t": "A"
+    },
+    {
+     "t": "YEAR."
+    }
+   ]
+  },
+  {
+   "in": 34.25,
+   "out": 35.41,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "AND"
+    },
+    {
+     "t": "HERE'S"
+    },
+    {
+     "t": "THE"
+    },
+    {
+     "t": "PART"
+    }
+   ]
+  },
+  {
+   "in": 35.41,
+   "out": 36.65,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "NOBODY'S"
+    },
+    {
+     "t": "TELLING"
+    },
+    {
+     "t": "YOU"
+    },
+    {
+     "t": "\u2014"
+    }
+   ]
+  },
+  {
+   "in": 37.05,
+   "out": 38.07,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "THIS"
+    },
+    {
+     "t": "THING"
+    },
+    {
+     "t": "CAN"
+    },
+    {
+     "t": "RUN"
+    }
+   ]
+  },
+  {
+   "in": 38.07,
+   "out": 40.01,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "A"
+    },
+    {
+     "t": "7-BILLION-PARAMETER",
+     "emph": true
+    },
+    {
+     "t": "AI"
+    },
+    {
+     "t": "MODEL"
+    }
+   ]
+  },
+  {
+   "in": 40.01,
+   "out": 40.99,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "AT"
+    },
+    {
+     "t": "READING",
+     "emph": true
+    },
+    {
+     "t": "SPEED.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 40.99,
+   "out": 41.83,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "LOCALLY.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 41.83,
+   "out": 42.61,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "PRIVATELY.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 42.61,
+   "out": 43.51,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "TONIGHT.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 43.85,
+   "out": 45.25,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "THE"
+    },
+    {
+     "t": "MOST"
+    },
+    {
+     "t": "PRIVATE",
+     "emph": true
+    },
+    {
+     "t": "AI"
+    },
+    {
+     "t": "INFRASTRUCTURE"
+    }
+   ]
+  },
+  {
+   "in": 45.25,
+   "out": 46.31,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "YOU"
+    },
+    {
+     "t": "WILL"
+    },
+    {
+     "t": "EVER"
+    },
+    {
+     "t": "OWN",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 46.31,
+   "out": 47.75,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "IS"
+    },
+    {
+     "t": "ALREADY"
+    },
+    {
+     "t": "IN"
+    },
+    {
+     "t": "YOUR"
+    },
+    {
+     "t": "OWN"
+    },
+    {
+     "t": "HOUSE\u2026"
+    }
+   ]
+  },
+  {
+   "in": 47.75,
+   "out": 49.39,
+   "y": "bottom-180",
+   "words": [
+    {
+     "t": "POWERED",
+     "emph": true
+    },
+    {
+     "t": "OFF.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 49.77,
+   "out": 51.25,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "I"
+    },
+    {
+     "t": "STOPPED"
+    },
+    {
+     "t": "TREATING"
+    },
+    {
+     "t": "THEM"
+    },
+    {
+     "t": "LIKE"
+    },
+    {
+     "t": "JUNK"
+    }
+   ]
+  },
+  {
+   "in": 51.25,
+   "out": 52.45,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "AND"
+    },
+    {
+     "t": "STARTED"
+    },
+    {
+     "t": "TREATING"
+    },
+    {
+     "t": "MY"
+    },
+    {
+     "t": "LAPTOPS"
+    }
+   ]
+  },
+  {
+   "in": 52.45,
+   "out": 53.51,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "LIKE"
+    },
+    {
+     "t": "TEAMMATES.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 53.81,
+   "out": 54.81,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "THIS"
+    },
+    {
+     "t": "IS"
+    },
+    {
+     "t": "OMNIBUS.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 55.15,
+   "out": 55.85,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "YOUR"
+    },
+    {
+     "t": "LAPTOPS,",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 56.07,
+   "out": 56.77,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "YOUR"
+    },
+    {
+     "t": "IDEAS,",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 56.99,
+   "out": 57.67,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "YOUR"
+    },
+    {
+     "t": "MODELS.",
+     "emph": true
+    }
+   ]
+  },
+  {
+   "in": 57.99,
+   "out": 58.55,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "WATCH"
+    },
+    {
+     "t": "WHAT"
+    },
+    {
+     "t": "HAPPENS"
+    }
+   ]
+  },
+  {
+   "in": 58.55,
+   "out": 60.27,
+   "y": "bottom-96",
+   "words": [
+    {
+     "t": "WHEN"
+    },
+    {
+     "t": "THE"
+    },
+    {
+     "t": "DRAWER",
+     "emph": true
+    },
+    {
+     "t": "LAPTOP",
+     "emph": true
+    },
+    {
+     "t": "GETS"
+    },
+    {
+     "t": "A"
+    },
+    {
+     "t": "JOB.",
+     "emph": true
+    }
+   ]
+  }
+ ],
+ "statCards": [
+  {
+   "in": 9.21,
+   "out": 14.51,
+   "position": "top-right",
+   "lines": [
+    "SERVICE \u00b7 6 YEARS",
+    "STATUS \u00b7 DRAWER"
+   ]
+  },
+  {
+   "in": 22.96,
+   "out": 24.5,
+   "position": "top-right",
+   "lines": [
+    "16 GB RAM"
+   ]
+  },
+  {
+   "in": 24.5,
+   "out": 29.4,
+   "position": "top-right",
+   "lines": [
+    "16 GB RAM",
+    "8 CORES"
+   ]
+  },
+  {
+   "in": 30.05,
+   "out": 31.42,
+   "position": "top-right",
+   "lines": [
+    "9 DEVICES",
+    "PER HOUSEHOLD"
+   ]
+  },
+  {
+   "in": 31.46,
+   "out": 33.92,
+   "position": "top-right",
+   "lines": [
+    "62,000,000 TONNES \u00b7 YR",
+    "E-WASTE \u00b7 UN"
+   ]
+  }
+ ],
+ "titleCard": {
+  "in": 60.6,
+  "elements": "Black #0c0c0e full frame from the 60.57 cut. (1) 60.68 \u2014 wordmark 'Omnibus' Helvetica Neue 700, 128px, INK #f6f6f4, letter-spacing -0.035em, centered, baseline y=500; fade 0->1 over 0.28s with tracking easing from -0.010em to -0.035em (ease-out cubic, no overshoot). (2) 60.96 \u2014 hairline rule 2px x 64px, FAINT rgba(246,246,244,0.26), centered at y=560; scales from 0 to 64px width over 0.22s ease-out. (3) 61.06 \u2014 tagline Menlo 22px ALL-CAPS MUTED rgba(246,246,244,0.62), letter-spacing 0.14em, centered y=604: 'YOUR LAPTOPS \u00b7 YOUR IDEAS \u00b7 YOUR MODELS'; fade 0.25s. (4) 61.30 \u2014 command line Menlo 20px centered y=656: '$' in FAINT, ' npx omnibus' in INK, followed by an 11x22px block cursor in MUTED that blinks once (on 61.55-61.80); fade 0.25s. All elements hold to 61.80, hard end, no fade-out. AUDIO SYNC (locked): the 60.68 accent = the pitched-down divehit SFX end-hit (mix cue moved to 60.68) landing on the same frame as the wordmark fade-in start, riding on the music swell to -10. It is NOT a cadential music downbeat \u2014 per the music plan the track sits on a sustained unresolved pad from ~60.5, no cadence, alive at ~-13 at the 61.8 hard end (colon, not period)."
+ },
+ "moves": [
+  {
+   "start": 3,
+   "end": 5.9,
+   "type": "push",
+   "scaleFrom": 1,
+   "scaleTo": 1.08,
+   "anchor": "laptop in drawer",
+   "reason": "Dust-blow reveal: slow lean-in as the dust comes off the dusty HP (event 3.0-5.5). Ends 5.90, settled before the 6.37 cut to presenter. Curiosity beat with no VO; pairs with dust-blow SFX. Verified cut-safe (1.50 < move < 6.37)."
+  },
+  {
+   "start": 11.16,
+   "end": 17.04,
+   "type": "punch",
+   "scaleFrom": 1,
+   "scaleTo": 1.06,
+   "anchor": "presenter face (HP laptop kept in frame at bottom)",
+   "reason": "Hard step exactly on word start of 'slow' (words.json 11.16) - the reason the laptop was abandoned. Held flat at 1.06 through 'too guilty to throw it away'; hold ends where move 3 takes over. Within the 6.37-18.87 shot, cut-safe."
+  },
+  {
+   "start": 17.04,
+   "end": 18.83,
+   "type": "push",
+   "scaleFrom": 1.06,
+   "scaleTo": 1.1,
+   "anchor": "presenter face (HP laptop kept in frame at bottom)",
+   "reason": "Continues from the held punch: slow squeeze starting on word start 'statistically' (17.04) as the coworkers' verdict lands. Same anchor as move 2 so there is no lateral drift. Ends 18.83, one frame before the 18.87 cut, which resets scale to 1.00 for free (no release move needed)."
+  },
+  {
+   "start": 21.84,
+   "end": 29.34,
+   "type": "push",
+   "scaleFrom": 1,
+   "scaleTo": 1.06,
+   "anchor": "glowing internals of x-ray hologram (RAM/CPU cluster)",
+   "reason": "Ken Burns into the x-ray: starts on word start 'laptop' (21.84), right as the lid turns translucent (~21.5), and creeps through '16 gigabytes... eight cores... laying around idly', ending at end of 'idly' (29.34). Hologram glow is not camera motion, so nothing is fought. Pairs with hologram hum."
+  },
+  {
+   "start": 30.1,
+   "end": 31.46,
+   "type": "punch",
+   "scaleFrom": 1.06,
+   "scaleTo": 1.09,
+   "anchor": "glowing internals of x-ray hologram (RAM/CPU cluster)",
+   "reason": "Stat punch 1 on word start 'nine' (30.10) - 'nine of these in the average house'. Steps up from the Ken Burns resting scale; hold ends where stat punch 2 fires. Same anchor, so it reads as one escalating system."
+  },
+  {
+   "start": 31.46,
+   "end": 33.94,
+   "type": "punch",
+   "scaleFrom": 1.09,
+   "scaleTo": 1.12,
+   "anchor": "glowing internals of x-ray hologram (RAM/CPU cluster)",
+   "reason": "Stat punch 2 on word start '62' (31.46) - the biggest number gets the maximum scale (1.12 cap). NOW UNIFIED: the 62,000,000 TONNES stat card enters at 31.46 too, and the music downbeat nudge targets 31.46 - punch, card, and beat are one accent. Held to 33.94, released by the 33.97 cut. Cut-safe: never crosses the cut."
+  },
+  {
+   "start": 38.56,
+   "end": 40.06,
+   "type": "punch",
+   "scaleFrom": 1,
+   "scaleTo": 1.1,
+   "anchor": "Properties window at left half",
+   "reason": "Word start 'billion' (38.56): frame steps toward the mistral-7b.gguf Properties window just as the split-flap digits begin locking 7,000,000,000 (38.80-39.40). Safely clear of the no-move dive window (37.30-37.95). Held through the digit lock; split-flap flutter SFX under it."
+  },
+  {
+   "start": 40.06,
+   "end": 40.36,
+   "type": "release",
+   "scaleFrom": 1.1,
+   "scaleTo": 1,
+   "anchor": "center",
+   "reason": "Quick 0.3s release landing on word start 'at' (40.06), fully home at 40.36 - four frames before Notepad opens at 40.40. From here to 49.57 the Windows world's own choreography (toasts, BLOCK dialog, snap 44.83-46.10, minimizes 47.7-48.5, shutdown) plays at 1.00, never fought."
+  },
+  {
+   "start": 51.95,
+   "end": 52.3,
+   "type": "shake",
+   "scaleFrom": 1.05,
+   "scaleTo": 1,
+   "anchor": "presenter catching laptop (hands/chest)",
+   "reason": "The one permitted shake: catch impact at 51.95 (cut to hallway 51.73, so cut-safe). 0.35s crop jitter, amplitude ~8px at 1080p decaying to 0, from 1.05 overscan settling to 1.00 by 52.30. FRAME LOCK: shake start, catch-foley transient, and the music bar-1 stab all carry the identical timestamp 51.95 and must render on the same output frame - do not let the three departments round differently."
+  },
+  {
+   "start": 58.04,
+   "end": 60.12,
+   "type": "push",
+   "scaleFrom": 1,
+   "scaleTo": 1.08,
+   "anchor": "presenter face with caught laptop",
+   "reason": "Final line: push begins on word start 'Watch' (whisper 'What', 58.04) and completes exactly on the last word 'job' end (60.12). Holds still through the breath before the 60.57 cut to black / title card. The closing invitation gets the film's last forward motion."
+  }
+ ],
+ "cues": [
+  {
+   "time": 0.05,
+   "source": "drawer",
+   "gainDb": -9,
+   "fadeInMs": 0,
+   "fadeOutMs": 250,
+   "note": "Cold open: drawer slide+creak. Trim the 4.0s clip to its first ~1.45s: slide onset at 0.05, wooden stop/creak peak ~1.30, fully out before the 1.50 scene cut. Featured \u2014 no VO yet, music is barely in."
+  },
+  {
+   "time": 3,
+   "source": "dustblow",
+   "gainDb": -10,
+   "fadeInMs": 60,
+   "fadeOutMs": 350,
+   "note": "Dust blown off the HP. Use the strongest ~1.3s puff from the 3.0s clip, plume onset synced ~3.05. Music-focus beat (no VO until 6.40) \u2014 SFX sits inside the swell, not on top of it."
+  },
+  {
+   "time": 21.3,
+   "source": "hologram",
+   "gainDb": -14,
+   "fadeInMs": 120,
+   "fadeOutMs": 0,
+   "note": "X-ray IGNITION: first ~1.6s of the clip (power-up sweep) as the lid turns translucent ~21.5; 300ms equal-power crossfade into the sustain cue. NOTE: ignition+sustain are ONE continuous hologram voice on the bus (counts as 1 layer for stacking). DECISION: no whoosh at the 18.87 cut \u2014 it lands mid-word 'statistically' (17.04-19.04); the music pulse carries that cut."
+  },
+  {
+   "time": 22.9,
+   "source": "hologram",
+   "gainDb": -24,
+   "fadeInMs": 400,
+   "fadeOutMs": 900,
+   "note": "Hologram SUSTAIN under the stats VO: loop the steady-state 3.0-7.0s region (250ms equal-power loop crossfades) to reach 31.5; fade 30.9-31.8 as the hologram dissolves. Hard rule: never masks '16 gigabytes / eight cores / nine of these'."
+  },
+  {
+   "time": 22.85,
+   "source": "SYNTH:data-tick 1.2kHz 25ms x2",
+   "gainDb": -27,
+   "note": "RAM module glow, aligned to '16' spoken 22.76. Garnish only \u2014 cut if it clutters."
+  },
+  {
+   "time": 24.55,
+   "source": "SYNTH:data-tick 1.2kHz 25ms x2",
+   "gainDb": -27,
+   "note": "CPU glow, aligned to 'eight cores' (24.50). Garnish only."
+  },
+  {
+   "time": 34.3,
+   "source": "lidclose",
+   "gainDb": -16,
+   "fadeInMs": 30,
+   "fadeOutMs": 250,
+   "note": "Lid OPENING: reverse the lidclose clip so the latch click reads as an unlatch at 34.30 with a faint hinge tail to ~35.0. This practical foley carries the 33.97 cut \u2014 no added transition whoosh; the dive riser owns the next airspace."
+  },
+  {
+   "time": 35.45,
+   "source": "divehit",
+   "gainDb": -8,
+   "fadeInMs": 2000,
+   "fadeOutMs": 600,
+   "note": "THE DIVE. Keep only the tail ~2.5s of the 4.0s clip and slide it so the impact transient lands exactly 37.95 (locate the transient in-file first \u2014 do not trust the nominal length). The 2.0s fade-in emerges under 'nobody's telling you' (35.46-36.50), crests through the glass-hole 37.30-37.70, impact 37.95 = loudest SFX moment of the act, frame-locked with the music DROP at 37.95; tail rings to ~38.5 under the Properties pop."
+  },
+  {
+   "time": 38.3,
+   "source": "SYNTH:window-pop 620Hz 100ms rising",
+   "gainDb": -18,
+   "note": "mistral-7b.gguf Properties window opens (event 38.30)."
+  },
+  {
+   "time": 38.8,
+   "source": "SYNTH:flap-ticker 18 ticks over 0.6s",
+   "gainDb": -16,
+   "fadeOutMs": 60,
+   "note": "Split-flap digits lock 7,000,000,000 left-to-right 38.80-39.40, exactly under '7 billion parameter' (38.26-39.38). Final tick at 39.40 ~+3dB \u2014 the 'lock'. Slightly featured; the ticker IS the number."
+  },
+  {
+   "time": 40.4,
+   "source": "SYNTH:window-pop 620Hz 100ms rising",
+   "gainDb": -20,
+   "note": "Notepad opens (tokens start 40.57)."
+  },
+  {
+   "time": 40.5,
+   "source": "typing",
+   "gainDb": -26,
+   "fadeInMs": 250,
+   "fadeOutMs": 600,
+   "note": "Token-stream bed: trim the 8.0s typing clip to ~4.4s, LPF at 3kHz so it reads as machine texture. Sits under 'reading speed / locally / privately' \u2014 subtle; fully out by 44.9 before the snap thunks (never a 3rd layer over the UI pops)."
+  },
+  {
+   "time": 41.83,
+   "source": "SYNTH:toast-pop 500-370Hz 140ms falling",
+   "gainDb": -18,
+   "note": "Wi-Fi disconnected toast \u2014 FALLING contour reads as 'off/severed'. Frame-locked to the in-world toast at 41.83; lands on the tail of 'locally' (word runs 41.04-41.88), which is fine at -18 (standard tier, not featured). Do not shift it to chase a VO gap \u2014 the picture owns this time."
+  },
+  {
+   "time": 42.7,
+   "source": "SYNTH:window-pop 560Hz 90ms",
+   "gainDb": -19,
+   "note": "cloud-sync.exe Block dialog opens (event 42.70)."
+  },
+  {
+   "time": 43.27,
+   "source": "SYNTH:click sharp 2kHz 30ms",
+   "gainDb": -14,
+   "note": "Pointer clicks BLOCK (event 43.27). Clicks cut through \u2014 keep them consistent at -14 across the film."
+  },
+  {
+   "time": 43.77,
+   "source": "SYNTH:ding 880Hz+1760Hz 400ms decay",
+   "gainDb": -11,
+   "note": "THE TONIGHT BEAT \u2014 'Omnibus is ready \u00b7 TONIGHT \u00b7 9:47 PM' toast. Slightly featured; onset sits in the true VO gap 43.36-43.90 ('tonight.' ends 43.36, 'The' starts 43.90); decay tucks under the next word onset. The ONLY bright/tonal UI sound in the act \u2014 keep it singular."
+  },
+  {
+   "time": 44.63,
+   "source": "SYNTH:grid-tick 900Hz 20ms",
+   "gainDb": -24,
+   "note": "Snap grid overlay appears (event 44.63) \u2014 a breath before the thunks."
+  },
+  {
+   "time": 44.9,
+   "source": "SYNTH:snap-thunk low 150Hz 80ms",
+   "gainDb": -16,
+   "note": "Window 1 tiles into the 2x2 grid (tiling begins 44.83; first landing ~44.90)."
+  },
+  {
+   "time": 45.37,
+   "source": "SYNTH:snap-thunk low 150Hz 80ms",
+   "gainDb": -16,
+   "note": "Window 2 \u2014 Fleet window lands (frame-verified 45.37)."
+  },
+  {
+   "time": 45.63,
+   "source": "SYNTH:snap-thunk low 150Hz 80ms",
+   "gainDb": -16,
+   "note": "Window 3 \u2014 Second Brain lands (frame-verified 45.63)."
+  },
+  {
+   "time": 46.1,
+   "source": "SYNTH:snap-thunk low 150Hz 80ms",
+   "gainDb": -16,
+   "note": "Window 4 lands, grid complete \u2014 moved to 46.10 to match the measured end of the tiling range (was 46.0). Four identical thunks = mechanical certainty; do not vary the pitch."
+  },
+  {
+   "time": 47.7,
+   "source": "SYNTH:minimize-whoosh filtered noise 200ms down-sweep",
+   "gainDb": -24,
+   "note": "Minimize 1 of 4 (event 47.70). Pitch each successive whoosh ~2 semitones LOWER so the sequence audibly descends toward shutdown."
+  },
+  {
+   "time": 47.97,
+   "source": "SYNTH:minimize-whoosh filtered noise 200ms down-sweep -2st",
+   "gainDb": -24,
+   "note": "Minimize 2 of 4 (event 47.97)."
+  },
+  {
+   "time": 48.23,
+   "source": "SYNTH:minimize-whoosh filtered noise 200ms down-sweep -4st",
+   "gainDb": -24,
+   "note": "Minimize 3 of 4 (event 48.23)."
+  },
+  {
+   "time": 48.5,
+   "source": "SYNTH:minimize-whoosh filtered noise 200ms down-sweep -6st",
+   "gainDb": -25,
+   "note": "Minimize 4 of 4 (event 48.50) \u2014 a hair quieter; the room is emptying."
+  },
+  {
+   "time": 48.7,
+   "source": "SYNTH:window-pop 560Hz 90ms",
+   "gainDb": -20,
+   "note": "'Shut down HP-DRAWER?' dialog opens (event 48.70)."
+  },
+  {
+   "time": 49.17,
+   "source": "SYNTH:click sharp 2kHz 30ms",
+   "gainDb": -14,
+   "note": "Pointer clicks SHUT DOWN (event 49.17)."
+  },
+  {
+   "time": 49.2,
+   "source": "powerdn",
+   "gainDb": -12,
+   "fadeInMs": 0,
+   "fadeOutMs": 500,
+   "note": "Power-down: first ~1.3s of the 3.0s clip (descending whine), fully out by 50.3. Desktop dies 49.23-49.57 exactly under the VO word 'off.' (48.60-49.24). CRITICAL: 49.6-50.6 stays NAKED \u2014 no room-tone fill, no SFX, music muted. VO alone ('I' starts 49.82) over the silence IS the effect."
+  },
+  {
+   "time": 51.12,
+   "source": "lidclose",
+   "gainDb": -14,
+   "fadeInMs": 0,
+   "fadeOutMs": 200,
+   "note": "Lid closes on its own: trim to the latch-click transient. MOVED 50.9 -> 51.12: the lid seats at the END of the 50.6-51.2 close, so the latch lands at the seat, not mid-swing. Still the first sound after the silence; -14 reads featured without being loud. Tail clears before it would stack a 3rd layer (overlaps only flyoff)."
+  },
+  {
+   "time": 51.2,
+   "source": "flyoff",
+   "gainDb": -12,
+   "fadeInMs": 60,
+   "fadeOutMs": 250,
+   "note": "Laptop lifts and flies out the right edge 51.2-51.55: MOVED 51.25 -> 51.20 to start on the measured lift-off frame. Trim the 2.0s clip to ~0.9s of rising doppler, pan center to R60; let the tail bridge the 51.73 hallway cut so the whoosh stitches the two locations."
+  },
+  {
+   "time": 51.95,
+   "source": "catch",
+   "gainDb": -9,
+   "fadeInMs": 0,
+   "fadeOutMs": 400,
+   "note": "THE CATCH \u2014 impact transient at exactly 51.95, FRAME-LOCKED with the EDL shake start (51.95) and the music bar-1 stab (51.95): all three on the same output frame. Keep ~0.5s of handling/cloth tail through 'settled' at 52.5. Second-biggest hit after the dive."
+  },
+  {
+   "time": 60.68,
+   "source": "divehit",
+   "gainDb": -13,
+   "fadeInMs": 0,
+   "fadeOutMs": 1200,
+   "note": "End hit under the title card: MOVED 60.6 -> 60.68 to land on the same frame as the wordmark fade-in start (title card element 1) and the music swell peak \u2014 was 80ms early, splitting the accent. Reuse ONLY the impact transient (no riser), pitched -4 st and LPF 1.2kHz \u2014 a darker cousin of the dive hit, bookending the act. Tail fades under the card to 61.8."
+  }
+ ],
+ "musicPlan": "USE OF THE SONILO TRACK (first ~62s of the 3-min generation; sections are nudgeable, so request boundaries first, razor-edit as fallback).\n\nSECTION MAP REQUEST (preferred): ask Sonilo for (a) sparse-build to groove drop at 38.0s, (b) a 1.4s breakdown/mute at 49.3, (c) a bar-1 downbeat at 51.95 \u2014 CORRECTED from 52.0: it must land on the catch-impact frame, same frame as the shake and catch foley, (d) a sustained open pad (no cadence) from ~60.5. FALLBACK (razor edit): use track 0:00-0:36.2 of the min-1 sparse build for film 0-36.2, then a beat-aligned 300ms equal-power crossfade jump to the last pre-drop bar so the min-2 groove DROP plays at exactly 37.95 \u2014 the drop and the dive impact are the same event. All edits on barlines, 250-300ms equal-power crossfades.\n\nTIMELINE: 0.00 enter at -22 dB rel VO \u2014 a pulse, almost subliminal, under the drawer slide. FOCUS MOMENT 1 (3.0-6.4): swell to -14 for the dust-blow reveal \u2014 no VO yet, the only breathing room the act gets; ride back down to -20/-22 as VO enters at 6.40 (sidechain takes over). 6.4-18.9: sparse build sits ducked under the confession VO; step up ~2dB at 15.4 ('My coworkers tell me...'). 18.87 cut: no music event \u2014 the pulse continuing THROUGH the cut smooths it (why the whoosh was skipped). 21.5-31.5 hologram: keep sparse; the hologram hum at -24 occupies the pad slot, so thin the music here if the generation is busy. A downbeat nudged to 31.46 lets the '62 million' zoom punch AND the tonnes stat-card entrance (both now at 31.46) land on a hit \u2014 one unified accent, optional but preferred. 33.97-36.2: build tension; if the track has a pre-drop riser/fill, place it 36.2-37.9 interlocking with the divehit riser. FOCUS MOMENT 2 (37.10-38.0): music and SFX riser crest together; DROP at 37.95 at -12, then settle to -16 groove for the descent 38.0-49.2, sidechained to -20 under dense VO. Do NOT add music accents on the UI beats \u2014 the synth cues are the percussion section; the ding at 43.77 must own its gap (the caption plan's earlier suggestion of tick-points at 40.99/41.83/42.61 is DELETED \u2014 it contradicted this rule). 49.2-50.7: KILL the music with the power-down \u2014 fast 250ms fade starting 49.25, DEAD SILENT until 50.7 ('powered off' only works if everything obeys the shutdown; VO alone continues at 49.82). 50.7: re-enter low (-20) with a filtered/thinned groove (fallback: same groove bar, HPF 300Hz, open the filter over 1.2s). FOCUS MOMENT 3 (51.95): bar-1 downbeat/stab lands EXACTLY on the catch at -14, frame-locked with shake + catch foley (VO is mid-phrase, so a one-beat stab, not a sustained swell), then settle to -18 under the closing lines. 53.9 'This is Omnibus': open up ~2dB, fuller voicing \u2014 conviction, not climax. 58.3-60.1 final line: hold steady, no build (the line is the build). 60.57 cut to black: FOCUS MOMENT 4 \u2014 swell to -10 under the title card; the accent lives in the SFX end-hit now at 60.68, same frame as the wordmark. The music itself plays NO downbeat there \u2014 see end treatment.\n\nEND TREATMENT (hand-off, not ending): from 60.5 the music must sit on a SUSTAINED, UNRESOLVED voicing \u2014 an open pad/held chord, no cadence, no final downbeat (the 60.68 accent is the SFX end-hit riding the swell, not a music event). Ride from -10 down ~3dB across 61.0-61.8 but DO NOT fade to silence: the cut ends at 61.8 with the music still alive at ~-13, mid-phrase, because the same track continues into minute 2 (the live-demo groove) in part 2 of the film. The title card should feel like a colon, not a period.",
+ "levels": "DELIVERABLE TARGET: -16 LUFS integrated, true peak ceiling -1.5 dBTP (safe across YouTube/Devpost embeds/social; survives -14 normalization without repenalty), LRA 6-9 \u2014 wide enough that the 49.6-50.6 silence and the 37.95 impact both register, controlled enough for laptop speakers. Master bus: true-peak limiter at -1.5 dBTP, no more than 1-2dB of limiting on the dive and catch hits. Check the whole mix in mono fold-down (UI synths are centered; only the flyoff pans, R60 max, so fold-down is safe).\n\nBUS ARCHITECTURE: VO is the reference bus \u2014 clean up first (HPF 80Hz, de-ess, 2:1 compression for 3-5dB GR), normalize so active speech sits ~-18 LUFS short-term; every gainDb in the cue sheet is relative to this anchor. MUSIC bus: nominal -20 dB rel VO under speech (post-sidechain), featured moments -10 to -14 per the music plan (dust-blow, drop, catch stab, title card). SFX bus, three tiers: beds/atmosphere -24 to -27 (hologram sustain, typing, minimize whooshes), standard UI/foley -14 to -20 (pops, clicks, thunks, toasts, lid work), featured hits -8 to -13 (drawer, dustblow, dive impact, catch, power-down, end hit). Light 1.5:1 glue on the SFX bus only; do not compress the dive/catch transients away. STACKING RULE (verified against the locked cue sheet): never more than 2 simultaneous SFX layers \u2014 the hologram ignition/sustain crossfade counts as one voice; the typing bed is fully out by 44.9 before the snap thunks; lidclose tail (51.12) overlaps only flyoff (51.2); flyoff tail overlaps only the catch (51.95).\n\nSIDECHAIN (music keyed from VO): threshold set so speech produces 4-6dB gain reduction \u2014 cap the duck at 6dB so music never audibly pumps to zero; ratio 3:1; attack 20ms; hold 100ms; release 500ms so the music breathes back in the phrase gaps ('tonight. // The most private...', 'off. // I stopped...'); 10ms lookahead if available. The sidechain handles dense VO automatically; the four FOCUS moments and the 49.25 kill are MANUAL rides on top \u2014 do not let the compressor make creative decisions. Optionally key 2dB of SFX-bus duck from the VO for the descent UI cluster (40.4-46.0) where cues are densest. Also duck the MUSIC 2dB under the two featured impacts (37.95, 51.95) only if the drop/stab edits don't already align \u2014 if the music plan's boundary nudges land, the accents coincide (both are now frame-locked: drop=37.95, stab=51.95) and no duck is needed.\n\nSOURCE PATHS: footage /Users/chava/Desktop/omnibus/docs/demo-assets/footage/copy_8226FE7C-AE0D-47E4-9685-9194C0BF58D3.mov (strip its live AAC VO to the dialog bus); SFX clips in /Users/chava/Desktop/omnibus/docs/demo-assets/sfx/ (drawer.mp3 4.0s, dustblow.mp3 3.0s, hologram.mp3 8.0s, divehit.mp3 4.0s, powerdn.mp3 3.0s, lidclose.mp3 2.0s, flyoff.mp3 2.0s, catch.mp3 2.0s, typing.mp3 8.0s \u2014 durations verified); word timings /Users/chava/Desktop/omnibus/docs/demo-assets/_scout/words.json. HLG note: footage is bt2020nc/arib-std-b67 \u2014 comp all graphics AFTER tone-mapping to the delivery transfer so INK #f6f6f4 stays reference white (per caption plan), and per the EDL either keep HLG tags end-to-end or tone-map once globally, never per segment.",
+ "changes": "SUPERVISOR PASS \u2014 every timestamp re-verified against words.json and the measured event table; 8 issues found, all resolved, no ideas dropped. (1) CATCH FRAME SPLIT [check f]: the music section-map requested a bar-1 downbeat at 52.0 while the EDL shake and catch foley sit at 51.95 \u2014 a 1.5-frame split on the film's second-biggest hit. Locked shake + catch transient + music stab all to 51.95 on the same output frame; frame-lock language added to all three plans. (2) TITLE ACCENT SPLIT [d]: mix end-hit at 60.6 vs the title card's music hit at 60.68 with the wordmark \u2014 two times for one accent. Both locked to 60.68 (wordmark fade-in frame). Also reconciled wording: the music plan forbids a final downbeat (unresolved pad hand-off), so the 60.68 accent is defined everywhere as the SFX end-hit riding the swell, not a cadence. (3) FIRST CAPTION CROSSED THE 6.37 CUT [a,d]: card 1 in at 6.35 put two frames of caption on the drawer-shot tail (the plan's otherwise-consistent 50ms word-lead policy backfires only at this cut). Moved to 6.40 = VO onset; all other 50ms leads verified intentional and kept. (4) STAT-CARD HANDOFF MISSED THE WORD [a,d]: the 62,000,000 TONNES card entered at 31.55, 90ms after '62' (31.46), with the 9-devices card still up to 31.5. Re-timed to out 31.42 / in 31.46 \u2014 now one unified accent with the EDL 1.12 punch at 31.46 and the optional music downbeat nudge (music plan updated to 31.46). (5) MUSIC-ACCENT CONTRADICTION [c]: caption notes suggested music tick-points at 40.99/41.83/42.61; the music plan explicitly forbids accents on UI beats. Tick-points deleted \u2014 the synth cues are the percussion there. (6) LID LATCH MISTIMED [d]: lidclose cue at 50.9 clicked mid-close; the lid seats at the end of the 50.6-51.2 event, so moved to 51.12. Flyoff nudged 51.25 -> 51.20 (measured lift-off frame). Snap-thunk 4 moved 46.0 -> 46.10 (measured 'grid complete'). Snap-thunk 1 kept at 44.90 (tiling begins 44.83; 44.90 is the first landing and keeps it clear of the typing-bed tail ending 44.9). (7) FACTUAL NOTE FIX [c,d]: the Wi-Fi toast note claimed the pop lands 'in the micro-gap after locally' \u2014 'locally' actually runs 41.04-41.88, so the frame-locked 41.83 toast lands on the word's tail. Time unchanged (picture-locked, and at -18 it is standard tier, not featured, so no dense-VO violation); note corrected so no one 'fixes' it later. The 43.77 ding's claimed gap 43.36-43.90 verified correct against words.json. (8) VERIFIED CLEAN [a,b,c,e]: zero caption time-overlaps across all 40 cards; all Windows-world cards 37.05-49.39 at bottom-180 (clears taskbar y1020-1080 and the white toast x>=1418); no stat cards inside 37.10-49.57; all 10 EDL moves cut-safe against 1.50/6.37/18.87/33.97/49.6/51.73/60.57 with nothing moving during the dive 37.30-37.95, the snap 44.83-46.10, or the minimizes 47.7-48.5; SFX never stacks more than 2 deep at any instant (hologram ignition->sustain crossfade is one voice; typing bed exits at 44.9 before the thunks); quiet-beat captions 49.77-52.45 confirmed minimal per check (e) \u2014 plain mono MUTED, zero emph words, bottom-96, VO continues so they must too. CARRY-FORWARD (unchanged and still binding): caption base style + EMPH pop rule with the merged word-start table (E-WASTE=16.40, 7-BILLION-PARAMETER=38.26 echoing the split-flap, OWN=46.00, POWERED=47.80, OFF=48.60, TEAMMATES=52.88, OMNIBUS=54.24 at the 1.15x exception, DRAWER=58.88, LAPTOP=59.24, JOB=59.90, etc.), the triad replacement-card treatment (caption leads, in-world UI answers), 'POWERED OFF.' holding alone over the dying desktop, no captions 0-6.40 and 60.27-60.57, whisper corrections list, StatCard style with cards 2/3 rendered as one persistent card gaining the '8 CORES' line at 24.50, the EDL's 4x-upscale-before-crop implementation note and 1.12 scale cap, and the full mix bus/sidechain architecture."
+}

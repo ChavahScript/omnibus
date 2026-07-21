@@ -15,3 +15,9 @@ mobile/fastlane/test_output/
 mobile/fastlane/README.md
 mobile/fastlane/report.xml
 *.xcarchive/
+
+# demo film media (rendered locally; too large for git)
+docs/demo-assets/
+tools/demo-video/public/
+tools/demo-video/out/
+mobile/.expo/
