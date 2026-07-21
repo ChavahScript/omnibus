@@ -8,10 +8,9 @@ import { VectorIcon } from "./VectorIcon";
 import { loadLocalIdeaHistory, upsertLocalIdeaRecord } from "../localData";
 import { colors, springs } from "../theme";
 import { playOfficeHaptic } from "../haptics";
+import { acceptsRecoveredBrief, isIdeaTerminalFailure, localIdeaIssue } from "../types";
 import type { LocalIdeaRecord } from "../localData";
-import type { CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, UsageStatus } from "../types";
-
-type IdeaPhase = "idle" | "shaping" | "ready" | "failed";
+import type { CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, IdeaPhase, UsageStatus } from "../types";
 
 type PendingCommand = {
   directive: string;
@@ -42,6 +41,7 @@ type OmnibusDashboardProps = {
  */
 export function OfficeDashboard({ connected, connectionPresence, usage, messages, pairingError, fleet, hasLocalAppleProfile, onOpenAccount, onOpenFleet, onPair, onCommand }: OmnibusDashboardProps): React.JSX.Element {
   const [idea, setIdea] = useState("");
+  const [ideaIssue, setIdeaIssue] = useState<string | null>(null);
   const [phase, setPhase] = useState<IdeaPhase>("idle");
   const [mode, setMode] = useState<CommandMode>("plan");
   const [submittedMode, setSubmittedMode] = useState<CommandMode>("plan");
@@ -70,8 +70,10 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
   const latestResult = useMemo(() => activeCorrelationId
     ? [...messages].reverse().find(message => message.stage === "result" && message.correlationId === activeCorrelationId)
     : undefined, [activeCorrelationId, messages]);
+  // Deliberately no allowlist of error stages: any bridge error scoped to the
+  // active idea must end its shaping state (see isIdeaTerminalFailure).
   const latestFailure = useMemo(() => activeCorrelationId
-    ? [...messages].reverse().find(message => (message.stage === "COMMAND_FAILED" || message.stage === "COMMAND_IN_PROGRESS" || message.stage === "INVALID_MESSAGE") && message.correlationId === activeCorrelationId)
+    ? [...messages].reverse().find(message => isIdeaTerminalFailure(message, activeCorrelationId))
     : undefined, [activeCorrelationId, messages]);
   const signals = useMemo(() => activeCorrelationId
     ? messages.filter(message => (message.agent === "auditor" || message.agent === "developer" || message.agent === "marketing") && message.correlationId === activeCorrelationId).slice(-3)
@@ -92,7 +94,10 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
   }, [refreshHistory]);
 
   useEffect(() => {
-    if (latestResult && phase === "shaping" && requestStartedAt !== null && latestResult.at.getTime() >= requestStartedAt) {
+    // acceptsRecoveredBrief also admits the "failed" phase: a reconnect replay
+    // can deliver the brief after the app already marked the idea failed, and
+    // that recovered brief upgrades the card rather than being discarded.
+    if (latestResult && acceptsRecoveredBrief(phase) && requestStartedAt !== null && latestResult.at.getTime() >= requestStartedAt) {
       setBrief(latestResult.text);
       setPhase("ready");
       if (activeRecordId) {
@@ -204,6 +209,14 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
     }
     const trimmed = idea.trim();
     if (!trimmed) return;
+    // Mirror the bridge schema bounds locally so an idea the bridge would
+    // reject never enters the shaping state at all.
+    const issue = localIdeaIssue(trimmed);
+    if (issue) {
+      setIdeaIssue(issue);
+      return;
+    }
+    setIdeaIssue(null);
     const research = mode !== "marketing" && webResearchRequested;
     const homeFleet = mode !== "marketing" && homeFleetRequested && Boolean(fleet?.homeFleet.workers.some(worker => worker.status === "online" && worker.modelReady && worker.approved));
     if (mode === "plan" && !research && !homeFleet) {
@@ -269,6 +282,7 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
         connectionPresence={connectionPresence}
         usage={usage}
         idea={idea}
+        ideaIssue={ideaIssue}
         phase={phase}
         mode={mode}
         pairingError={pairingError}
@@ -281,7 +295,10 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
         fleet={fleet}
         signals={signals}
         hasLocalAppleProfile={hasLocalAppleProfile}
-        onChange={setIdea}
+        onChange={value => {
+          setIdea(value);
+          if (ideaIssue) setIdeaIssue(null);
+        }}
         onModeChange={nextMode => {
           setMode(nextMode);
           if (nextMode === "marketing") {
@@ -318,6 +335,7 @@ function IdeaComposer({
   connectionPresence,
   usage,
   idea,
+  ideaIssue,
   phase,
   mode,
   pairingError,
@@ -344,6 +362,7 @@ function IdeaComposer({
   connectionPresence: ConnectionPresence;
   usage: UsageStatus | null;
   idea: string;
+  ideaIssue: string | null;
   phase: IdeaPhase;
   mode: CommandMode;
   pairingError?: string | null;
@@ -383,7 +402,7 @@ function IdeaComposer({
       </View>
     </View> : isFailed ? <View style={styles.failure}>
       <Text style={styles.failureTitle}>The local review did not return.</Text>
-      <Text style={styles.failureBody}>Confirm the bridge and local model are running on your laptop, then try the idea again.</Text>
+      <Text style={styles.failureBody}>Confirm the laptop link and local model are running on your main laptop, then try the idea again.</Text>
       <Pressable style={styles.textAction} onPress={onRestart}><Text style={styles.textActionText}>TRY A NEW IDEA</Text></Pressable>
     </View> : <>
       <ModeSelector value={mode} disabled={isShaping} onChange={onModeChange} />
@@ -392,7 +411,7 @@ function IdeaComposer({
       <FleetSetupCard fleet={fleet} connected={connected} onOpen={onOpenFleet} />
       <UsageTelemetry usage={usage} />
       {!connected && pairingError ? <Text style={styles.pairingNotice}>{pairingError}</Text> : null}
-      {!connected && !pairingError && connectionPresence === "stale" ? <Text style={styles.pairingNotice}>The laptop link has not answered its health check. Keep Omnibus open for a moment, or scan a fresh bridge code.</Text> : null}
+      {!connected && !pairingError && connectionPresence === "stale" ? <Text style={styles.pairingNotice}>The laptop link has not answered its health check. Keep Omnibus open for a moment, or scan a fresh code from your main laptop.</Text> : null}
       <Pressable onPress={onOpenAccount} style={({ pressed }) => [styles.profilePrompt, pressed && styles.profilePromptPressed]} accessibilityRole="button" accessibilityLabel={hasLocalAppleProfile ? "Open local Apple profile" : "Set up Sign in with Apple"}>
         <VectorIcon name="person" size={17} color={colors.paper} />
         <View style={styles.profilePromptCopy}>
@@ -434,6 +453,7 @@ function IdeaComposer({
         </Animated.View>
       </View>
       </View>
+      {ideaIssue ? <Text style={styles.ideaIssue}>{ideaIssue}</Text> : null}
     </>}
     {!isShaping && !isFailed ? <Text style={styles.subtlePrompt}>{workflow.helper}</Text> : null}
   </View>;
@@ -544,8 +564,8 @@ function shapingTitle(mode: CommandMode): string {
 function shapingBody(mode: CommandMode, researched: boolean, homeFleet: boolean): string {
   if (mode === "build") return "Your laptop is auditing the request, then applying only the workspace policy it is configured to allow.";
   if (mode === "marketing") return "Your laptop is preparing the explicitly requested marketing job through its configured provider.";
-  if (homeFleet && researched) return "Your laptop is collecting cited public sources and asking your paired home laptops for independent local peer reviews. Workspace files remain on the coordinator laptop.";
-  if (homeFleet) return "Your laptop is using its local audit, then asking your paired home laptops for independent peer reviews. Workspace files and saved memory remain on the coordinator laptop.";
+  if (homeFleet && researched) return "Your laptop is collecting cited public sources and asking your paired home laptops for independent local peer reviews. Workspace files remain on your main laptop.";
+  if (homeFleet) return "Your laptop is using its local audit, then asking your paired home laptops for independent peer reviews. Workspace files and saved memory remain on your main laptop.";
   return researched
     ? "Your laptop is collecting a few cited public sources, then using its local review to turn the rough thought into a usable brief for your IDE."
     : "Your laptop is running a local review and turning the rough thought into a usable brief for your IDE.";
@@ -643,7 +663,7 @@ function HomeFleetConsent({
     <View style={styles.researchIcon}><VectorIcon name="phone" size={17} color={colors.paper} /></View>
     <View style={styles.researchCopy}>
       <Text style={styles.researchTitle}>HOME FLEET / NOT READY</Text>
-      <Text style={styles.researchBody}>Add a private-LAN worker in Fleet Setup to request independent local peer reviews from spare laptops.</Text>
+      <Text style={styles.researchBody}>Add a home laptop in Fleet Setup to request independent local peer reviews from spare machines you control.</Text>
     </View>
   </View>;
   return <Pressable
@@ -657,14 +677,14 @@ function HomeFleetConsent({
     <View style={[styles.researchIcon, enabled && styles.fleetCardIconActive]}><VectorIcon name="phone" size={17} color={enabled ? colors.ink : colors.paper} /></View>
     <View style={styles.researchCopy}>
       <Text style={[styles.researchTitle, enabled && styles.researchTitleEnabled]}>HOME FLEET {enabled ? "ON" : "OFF"}</Text>
-      <Text style={[styles.researchBody, enabled && styles.researchBodyEnabled]}>{enabled ? `${readyWorkers.length} paired laptop${readyWorkers.length === 1 ? "" : "s"} will receive this idea and its audit summary for local peer review.` : "Keep this idea on the coordinator. Turn on to ask your paired home laptops for bounded local peer review."}</Text>
+      <Text style={[styles.researchBody, enabled && styles.researchBodyEnabled]}>{enabled ? `${readyWorkers.length} home laptop${readyWorkers.length === 1 ? "" : "s"} will receive this idea and its audit summary for local peer review.` : "Keep this idea on your main laptop. Turn on to ask your paired home laptops for bounded local peer review."}</Text>
     </View>
     <View style={[styles.researchSwitch, enabled && styles.researchSwitchEnabled]}><View style={[styles.researchKnob, enabled && styles.researchKnobEnabled]} /></View>
   </Pressable>;
 }
 
 function UsageTelemetry({ usage }: { usage: UsageStatus | null }): React.JSX.Element {
-  if (!usage) return <View style={styles.telemetry}><View style={styles.sectionHeading}><Text style={styles.sectionEyebrow}>LAPTOP TELEMETRY</Text><Text style={styles.sectionCaption}>Appears after a live bridge handshake</Text></View></View>;
+  if (!usage) return <View style={styles.telemetry}><View style={styles.sectionHeading}><Text style={styles.sectionEyebrow}>LAPTOP TELEMETRY</Text><Text style={styles.sectionCaption}>Appears after a live laptop link</Text></View></View>;
   const observed = Math.max(usage.observedCloudUsd, usage.estimatedCloudUsd);
   return <View style={styles.telemetry}>
     <View style={styles.sectionHeading}><Text style={styles.sectionEyebrow}>LAPTOP TELEMETRY</Text><Text style={styles.sectionCaption}>Informational, never a runtime quota</Text></View>
@@ -707,11 +727,11 @@ function ActionConfirmationSheet({ command, onCancel, onConfirm }: { command: Pe
     : isBuild
       ? command.research
         ? "This sends the request to the paired laptop and asks its configured search provider for public sources using only this idea text. Workspace files stay local. The laptop can change files only if host execution is explicitly enabled in its selected workspace."
-        : "This sends the request to the paired laptop. It can change files only if that laptop’s bridge is explicitly configured to allow host execution in its selected workspace."
+        : "This sends the request to the paired laptop. It can change files only if that laptop is explicitly configured to allow host execution in its selected workspace."
       : command.research && usesHomeFleet
-        ? "This sends only this idea text to the paired laptop’s configured search provider for public citations. It also sends only the original idea text to the private-LAN laptops you explicitly paired for local peer review. Workspace files, saved memory, audit output, credentials, and command authority stay on the coordinator laptop."
+        ? "This sends only this idea text to the paired laptop’s configured search provider for public citations. It also sends only the original idea text to the home laptops you explicitly paired for local peer review. Workspace files, saved memory, audit output, credentials, and command authority stay on your main laptop."
         : usesHomeFleet
-          ? "This sends only the original idea text to the private-LAN laptops you explicitly paired for local peer review. Workspace files, saved memory, audit output, credentials, and command authority stay on the coordinator laptop."
+          ? "This sends only the original idea text to the home laptops you explicitly paired for local peer review. Workspace files, saved memory, audit output, credentials, and command authority stay on your main laptop."
           : "This sends only this idea text to the paired laptop’s configured search provider for public citations. Workspace files, local idea memory, and credentials stay on your laptop.";
   return <View style={styles.confirmScrim} accessibilityViewIsModal>
     <Animated.View style={[styles.confirmSheet, animatedStyle]}>
@@ -887,6 +907,7 @@ const styles = StyleSheet.create({
   submit: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: colors.paper },
   submitQuiet: { opacity: 0.43 },
   subtlePrompt: { color: colors.paperMuted, fontSize: 12, lineHeight: 18, marginTop: 17, maxWidth: 390 },
+  ideaIssue: { color: colors.paper, marginTop: 11, paddingHorizontal: 2, fontSize: 12, lineHeight: 18 },
   processing: { marginTop: 60, minHeight: 240, padding: 20, borderRadius: 22, borderWidth: 1, borderColor: colors.line, backgroundColor: "rgba(20,20,21,.58)" },
   quotedIdea: { color: colors.paper, fontSize: 17, lineHeight: 25, letterSpacing: -0.25 },
   signalList: { marginTop: 34, gap: 13 },

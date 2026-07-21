@@ -110,6 +110,19 @@ export const BrainJournalEntrySchema = z.discriminatedUnion("op", [
     validTo: z.string().datetime().nullable(),
     reason: z.string().max(400),
   }),
+  /**
+   * Event-node recycling: only kind='event' nodes whose facts are ALL
+   * bi-temporally invalidated are ever retired, and only to unblock a NEW
+   * fact at the node cap. Entities, decisions, and bug fixes are never
+   * recycled. Journals written before this op existed replay unchanged;
+   * journals containing it are skipped (safeParse) by older readers.
+   */
+  z.object({
+    op: z.literal("retire-node"),
+    at: z.string().datetime(),
+    nodeId: z.string().min(1).max(64),
+    reason: z.string().max(400),
+  }),
 ]);
 export type BrainJournalEntry = z.infer<typeof BrainJournalEntrySchema>;
 
@@ -185,8 +198,15 @@ export interface KnowledgeGraphApi {
  * back to deterministic heuristics so tests and cold starts never block.
  */
 export interface LocalLlm {
-  /** Returns parsed JSON matching the caller's described shape, or null. */
-  generateJson(prompt: string, options?: { timeoutMs?: number }): Promise<unknown | null>;
+  /**
+   * Returns parsed JSON matching the caller's described shape, or null.
+   * `keepAlive` overrides the configured Ollama model residency for this one
+   * call: background watcher distillation passes "0" so an opportunistic 7B
+   * inference never pins gigabytes of unified memory between polls, while
+   * job-lifecycle callers keep the configured residency for prompt-cache
+   * warmth.
+   */
+  generateJson(prompt: string, options?: { timeoutMs?: number; keepAlive?: string }): Promise<unknown | null>;
   available(): Promise<boolean>;
 }
 

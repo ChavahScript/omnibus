@@ -10,6 +10,8 @@ const EMPTY_MEMORY: AgentSnapshot = { version: 1, updatedAt: new Date(0).toISOSt
  */
 export class SerializableAgentMemory {
   private readonly target: string;
+  /** Quarantine is attempted once per process; recovery must not loop renames. */
+  private quarantined = false;
 
   public constructor(stateDir: string) {
     this.target = path.join(stateDir, "agent-memory.json");
@@ -47,11 +49,28 @@ export class SerializableAgentMemory {
   }
 
   private async read(): Promise<AgentSnapshot> {
+    let raw: string;
     try {
-      return AgentSnapshotSchema.parse(JSON.parse(await readFile(this.target, "utf8")));
+      raw = await readFile(this.target, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return structuredClone(EMPTY_MEMORY);
       throw error;
+    }
+    try {
+      return AgentSnapshotSchema.parse(JSON.parse(raw));
+    } catch {
+      // A corrupt memory file must degrade to "no memory", never permanently
+      // fail every command that touches memory. The unreadable bytes are set
+      // aside for the owner to inspect, then reads behave exactly like ENOENT.
+      if (!this.quarantined) {
+        this.quarantined = true;
+        try {
+          await rename(this.target, `${this.target}.corrupt-${Date.now()}`);
+        } catch {
+          // Best effort: recovery proceeds even if the rename itself fails.
+        }
+      }
+      return structuredClone(EMPTY_MEMORY);
     }
   }
 

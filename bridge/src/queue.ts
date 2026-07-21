@@ -55,12 +55,19 @@ export class DurableCommandQueue {
     return this.withLock(async () => {
       const state = await this.load();
       const pending = pendingJobs(state).length;
-      if (state.jobs.some(job => job.id === command.correlationId)) {
+      const existingIndex = state.jobs.findIndex(job => job.id === command.correlationId);
+      if (existingIndex >= 0 && state.jobs[existingIndex]!.status !== "failed") {
         return { accepted: false, reason: "DUPLICATE", pending };
       }
       if (pending >= this.options.maxPending) {
         return { accepted: false, reason: "QUEUE_FULL", pending };
       }
+
+      // A colliding failed record is retained history, not live work: after a
+      // restart-recovered failure the owner resubmits the same correlationId,
+      // and that resubmission must start fresh attempts rather than being
+      // refused as a duplicate of its own failure.
+      if (existingIndex >= 0) state.jobs.splice(existingIndex, 1);
 
       const at = this.now().toISOString();
       const job: QueueJob = {
@@ -192,20 +199,39 @@ export class DurableCommandQueue {
 
   private async load(): Promise<CommandQueueSnapshot> {
     if (this.state) return this.state;
+    let raw: string | undefined;
     try {
-      const parsed = CommandQueueSnapshotSchema.parse(JSON.parse(await readFile(this.target, "utf8")));
-      this.state = parsed;
+      raw = await readFile(this.target, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (raw === undefined) {
+      this.state = clone(EMPTY_QUEUE);
+    } else {
+      try {
+        this.state = CommandQueueSnapshotSchema.parse(JSON.parse(raw));
+      } catch {
+        // A corrupt durable file must not brick every future command. The
+        // unreadable bytes are quarantined for the owner to inspect and the
+        // queue continues empty; genuine I/O errors above still surface so a
+        // detached volume is not silently treated as an empty queue.
+        await this.quarantineCorruptFile();
         this.state = clone(EMPTY_QUEUE);
-      } else {
-        throw error;
       }
     }
 
     const changed = recoverInterruptedJobs(this.state, this.now());
     if (changed) await this.persist(this.state);
     return this.state;
+  }
+
+  /** Best effort by design: quarantine failing must never block recovery. */
+  private async quarantineCorruptFile(): Promise<void> {
+    try {
+      await rename(this.target, `${this.target}.corrupt-${this.now().getTime()}`);
+    } catch {
+      // The next persist() overwrites the corrupt bytes atomically anyway.
+    }
   }
 
   private async persist(state: CommandQueueSnapshot): Promise<void> {

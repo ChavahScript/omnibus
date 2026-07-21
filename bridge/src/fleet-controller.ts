@@ -151,6 +151,12 @@ export class FleetController {
         downloadedModels: missing.map(requirement => requirement.model),
       });
       emit(status(correlationId, "fleet_ready", `${profile.name} local models are ready. The Auditor will use this fleet; the Developer still follows its configured provider.`));
+      // The returned snapshot is the phone's exit signal from the Fleet Setup
+      // sheet. Provisioning state must be cleared before the snapshot is
+      // captured, or the success response itself reports provisioning.active
+      // and traps the phone in the sheet forever. The `finally` below stays as
+      // the failure-path (and idempotent) guarantee.
+      this.provisioningProfileId = undefined;
       return await this.snapshot();
     } catch (error) {
       await this.auditEvent(correlationId, "fleet_provision_failed", {

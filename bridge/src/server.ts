@@ -5,7 +5,7 @@ import pino from "pino";
 import { WebSocket, WebSocketServer } from "ws";
 import type { AppConfig } from "./config.js";
 import { UsageLedger } from "./usage.js";
-import { ClientMessageSchema, type BridgeEvent, type ClientMessage } from "./contracts.js";
+import { ClientMessageSchema, classifyClientMessageRejection, type BridgeEvent, type ClientMessage } from "./contracts.js";
 import { AuditTrail } from "./audit.js";
 import { SerializableAgentMemory } from "./memory.js";
 import { PairingResumptionStore, PairingToken, BYPASS_TUNNEL_HEADER, RESUME_SESSION_HEADER } from "./security.js";
@@ -41,7 +41,11 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
   app.get("/health", (_request, response) => response.status(200).json({ ok: true, service: "omnibus-bridge" }));
 
   const httpServer = createServer(app);
-  const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 });
+  // 128KB comfortably covers a schema-legal 12,000-character directive even
+  // when every character is multibyte and JSON-escaped (~72KB observed). The
+  // frame limit exists only to bound memory; zod does the actual rejecting so
+  // an over-long idea gets a humane error event instead of a bare 1009 close.
+  const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   const clients = new Set<WebSocket>();
   // A rolling resume token identifies one iPhone-held device scope. Keeping a
   // single active socket for it prevents a race during Wi-Fi/cellular handoff
@@ -83,6 +87,13 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
   brain.setFleetCacheStatusProvider(() => homeFleet.cacheStatus());
   homeFleet.setContextBundleProvider(() => brain.fleetBundle());
   const fleet = new FleetController(config, new BridgeSettingsStore(config.statePath), audit, () => homeFleet.snapshot());
+  // Correlation ids of commands dispatched to the orchestrator that have not
+  // yet produced their terminal result/error frame. This is how the bridge
+  // knows a pairing rotation is abandoning in-flight work: the finished brief
+  // stays in the local audit log, and the next pairing deserves to hear that
+  // it exists without any brief content crossing the new trust boundary.
+  const inFlightCorrelationIds = new Set<string>();
+  let previousSessionNoticePending = false;
 
   httpServer.on("upgrade", (request, socket, head) => {
     const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -144,11 +155,31 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
     // Non-command frames emitted by an in-flight job are delivered through
     // this indirection. Once the phone reconnects, the same job callback
     // automatically targets the replacement socket instead of a dead one.
-    const deliver = (event: BridgeEvent): void => deviceEvents.emit(deviceId, event);
+    const deliver = (event: BridgeEvent): void => {
+      // Terminal frames close out the in-flight command they answer; this is
+      // the delivery-side half of the pairing-rotation orphaned-work notice.
+      if ((event.type === "result" || event.type === "error") && event.correlationId) {
+        inFlightCorrelationIds.delete(event.correlationId);
+      }
+      deviceEvents.emit(deviceId, event);
+    };
     send(socket, { type: "hello", deviceId, usage: usage.status(), resumeToken });
     // `hello` is intentionally first: the mobile app commits the rotating
     // resume secret before it processes the small replay tail below.
     for (const event of eventBinding.replay.events) send(socket, event);
+    if (previousSessionNoticePending) {
+      // One notice on the first connection after a rotation abandoned live
+      // work. Only the fact of completion crosses the new pairing boundary;
+      // the brief itself stays in the laptop-local audit log.
+      previousSessionNoticePending = false;
+      deliver({
+        type: "status",
+        correlationId: randomUUID(),
+        agent: "system",
+        stage: "previous_session_note",
+        text: "An idea from the previous pairing finished on this laptop; its brief is preserved in the local audit log (.omnibus/audit).",
+      });
+    }
     // Capability data is opt-in at pairing time and consists only of a small,
     // path-free resource summary. This makes the first phone screen useful
     // without asking the owner to edit a bridge environment file.
@@ -163,12 +194,14 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
       try {
         decoded = JSON.parse(raw.toString());
       } catch {
-        deliver({ type: "error", code: "INVALID_MESSAGE", message: "Invalid dashboard message." });
+        // No correlation id can be salvaged from a frame that never parsed.
+        deliver({ type: "error", code: "INVALID_MESSAGE", message: "The bridge received a message it couldn't read. Update the Omnibus app and try again." });
         return;
       }
       const parsed = ClientMessageSchema.safeParse(decoded);
       if (!parsed.success) {
-        deliver({ type: "error", code: "INVALID_MESSAGE", message: "Invalid dashboard message." });
+        const rejection = classifyClientMessageRejection(decoded, parsed.error);
+        deliver({ type: "error", correlationId: rejection.correlationId, code: rejection.code, message: rejection.message });
         return;
       }
       void handleMessage(parsed.data);
@@ -304,7 +337,14 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
         return;
       }
       if (message.type !== "command") return;
-      await orchestrator.execute(message, deliver, deviceId);
+      inFlightCorrelationIds.add(message.correlationId);
+      try {
+        await orchestrator.execute(message, deliver, deviceId);
+      } finally {
+        // The deliver wrapper normally clears this on the terminal frame; the
+        // finally guards against an execution path that throws before one.
+        inFlightCorrelationIds.delete(message.correlationId);
+      }
     }
 
     function sendFleetError(correlationId: string, error: unknown): void {
@@ -339,6 +379,11 @@ export function createBridgeServer(config: AppConfig): BridgeServer {
       // leave an older WebSocket alive beside the newly printed QR generation;
       // its token, resume secret, display replay, and command ingress all end
       // together. Same-origin relay recovery never calls this method.
+      // Rotation severs event delivery, but the orchestrator keeps working.
+      // Remember that a brief will finish (or already finished) unheard so the
+      // first connection of the next pairing gets pointed at the local audit
+      // log — the one place the abandoned result remains readable.
+      if (inFlightCorrelationIds.size > 0) previousSessionNoticePending = true;
       resumptions.clear();
       deviceEvents.clear();
       pairing.rotate();

@@ -366,3 +366,148 @@ test("stored text is redacted and bounded before it ever reaches the journal", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("node cap recycles spent event nodes so ambient learning continues", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "omnibus-brain-recycle-"));
+  try {
+    const clock = makeClock("2026-07-19T10:00:00.000Z");
+    const graph = new BiTemporalKnowledgeGraph(dir, { maxNodes: 4, maxFacts: 2, now: clock.now });
+    await graph.load();
+
+    // First 10 words identical: every contribution shares one object entity
+    // node and mints exactly one fresh event node, so the node cap is the
+    // only pressure being exercised.
+    const base = "repeated ambient observation payload marker alpha beta gamma delta epsilon";
+    for (let index = 0; index < 6; index += 1) {
+      const result = await graph.mergeContributions([{
+        txCreatedAt: clock.now().toISOString(),
+        origin: { channel: "diagnostics" },
+        text: `${base} tail-${index}`,
+      }]);
+      assert.equal(result.applied, 1, `contribution ${index} must still be learned at the node cap`);
+      clock.advance(60_000);
+    }
+
+    const stats = graph.stats();
+    assert.equal(stats.droppedForNodeCapacity ?? 0, 0, "recycling must prevent capacity drops");
+    assert.ok(stats.nodes <= 4, "node cap must hold");
+    assert.ok(
+      graph.currentFacts().some(fact => fact.factText.includes("tail-5")),
+      "the newest contribution must be a current belief",
+    );
+
+    const journal = await readFile(path.join(dir, "graph.ndjson"), "utf8");
+    assert.ok(journal.includes('"op":"retire-node"'), "retirements must be journaled");
+
+    // Retired event nodes stay gone after replay; only spent events left.
+    const reloaded = new BiTemporalKnowledgeGraph(dir, { maxNodes: 4, maxFacts: 2, now: clock.now });
+    await reloaded.load();
+    assert.deepEqual(reloaded.stats(), stats);
+    assert.deepEqual(reloaded.currentFacts(), graph.currentFacts());
+    assert.equal(reloaded.nodes().filter(node => node.kind === "event").length, 3);
+    // Durable kinds are never recycled: the shared entity node survives.
+    assert.equal(reloaded.nodes().filter(node => node.kind === "entity").length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("compaction archives old invalidated facts: live journal and RAM stay bounded", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "omnibus-brain-archive-"));
+  try {
+    const clock = makeClock("2026-07-19T10:00:00.000Z");
+    const graph = new BiTemporalKnowledgeGraph(dir, { maxFacts: 2, compactSlackLines: 4, now: clock.now });
+    await graph.load();
+
+    // Endless supersession on one slot: every belief is invalidated by the
+    // next, so invalidated history grows without bound unless archived.
+    const total = 30;
+    for (let index = 0; index < total; index += 1) {
+      await graph.assertFact({
+        subject: { kind: "entity", name: "bridge storage" },
+        predicate: "uses",
+        object: { kind: "entity", name: index % 2 === 0 ? "sqlite" : "postgres" },
+        factText: `storage belief ${index}`,
+        origin: ORIGIN,
+      });
+      clock.advance(60_000);
+    }
+
+    const liveLines = (await readFile(path.join(dir, "graph.ndjson"), "utf8"))
+      .split("\n").filter(line => line.trim());
+    assert.ok(liveLines.length <= 25, `live journal must stay bounded, saw ${liveLines.length}`);
+    assert.ok(graph.stats().facts <= 10, "in-memory fact count must stay bounded");
+    assert.equal(graph.currentFacts().length, 1);
+    assert.equal(graph.currentFacts()[0]?.factText, `storage belief ${total - 1}`);
+
+    const archiveLines = (await readFile(path.join(dir, "graph-archive.ndjson"), "utf8"))
+      .split("\n").filter(line => line.trim());
+    assert.ok(archiveLines.length >= 20, "old invalidated facts must overflow to the archive");
+    for (const line of archiveLines) {
+      const entry = JSON.parse(line) as { op: string; fact: { txInvalidatedAt: string | null } };
+      assert.equal(entry.op, "fact");
+      assert.notEqual(entry.fact.txInvalidatedAt, null, "only invalidated facts may go cold");
+    }
+    // Complete history: every fact is either live or archived, exactly once.
+    const liveFactLines = liveLines.filter(line => (JSON.parse(line) as { op: string }).op === "fact");
+    assert.equal(archiveLines.length + liveFactLines.length, total);
+
+    // load() never reads the archive and still reproduces the live state.
+    const reloaded = new BiTemporalKnowledgeGraph(dir, { maxFacts: 2, compactSlackLines: 4, now: clock.now });
+    await reloaded.load();
+    assert.deepEqual(reloaded.stats(), graph.stats());
+    assert.deepEqual(reloaded.currentFacts(), graph.currentFacts());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("compaction aborts instead of clobbering a concurrent instance's appends", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "omnibus-brain-concurrent-"));
+  try {
+    const clock = makeClock("2026-07-19T10:00:00.000Z");
+    const first = new BiTemporalKnowledgeGraph(dir, { maxFacts: 2, compactSlackLines: 4, now: clock.now });
+    await first.load();
+    const believe = async (index: number): Promise<void> => {
+      await first.assertFact({
+        subject: { kind: "entity", name: "bridge storage" },
+        predicate: "uses",
+        object: { kind: "entity", name: index % 2 === 0 ? "sqlite" : "postgres" },
+        factText: `storage belief ${index}`,
+        origin: ORIGIN,
+      });
+      clock.advance(60_000);
+    };
+    for (let index = 0; index < 6; index += 1) await believe(index); // 14 lines: below threshold
+
+    // A second live instance on the same brainDir (hook check while the
+    // bridge runs) appends entries the first instance never replayed.
+    const second = new BiTemporalKnowledgeGraph(dir, { now: clock.now });
+    await second.load();
+    await second.assertFact({
+      subject: { kind: "entity", name: "instance b marker" },
+      predicate: "notes",
+      object: { kind: "entity", name: "sibling process" },
+      factText: "written by instance b",
+      origin: ORIGIN,
+    });
+
+    // Push the first instance past its compaction threshold: every compact
+    // attempt must now detect the foreign lines and abort.
+    for (let index = 6; index < 10; index += 1) await believe(index);
+
+    const journal = await readFile(path.join(dir, "graph.ndjson"), "utf8");
+    assert.ok(journal.includes("written by instance b"), "concurrent append must survive");
+    const lineCount = journal.split("\n").filter(line => line.trim()).length;
+    assert.equal(lineCount, 25, "no rewrite may happen while instances disagree");
+
+    // A fresh load reconciles both writers' history.
+    const fresh = new BiTemporalKnowledgeGraph(dir, { now: clock.now });
+    await fresh.load();
+    const texts = fresh.currentFacts().map(fact => fact.factText);
+    assert.ok(texts.includes("written by instance b"));
+    assert.ok(texts.includes("storage belief 9"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

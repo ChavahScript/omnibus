@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ClientMessageSchema, isReplayableBridgeEvent, type BridgeEvent } from "./contracts.js";
+import {
+  ClientMessageSchema,
+  classifyClientMessageRejection,
+  isReplayableBridgeEvent,
+  salvageCorrelationId,
+  type BridgeEvent,
+} from "./contracts.js";
 
 const correlationId = "11111111-1111-4111-8111-111111111111";
 
@@ -76,4 +82,58 @@ test("only display-only paired events are eligible for a transient device replay
   assert.equal(isReplayableBridgeEvent(status), true);
   assert.equal(isReplayableBridgeEvent(invitation), false);
   assert.equal(isReplayableBridgeEvent({ type: "pong", sentAt: 1 }), false);
+});
+
+test("only command-scoped errors are replayable; context-free protocol errors never become phantom toasts", () => {
+  assert.equal(isReplayableBridgeEvent({ type: "error", correlationId, code: "LOCAL_TEAM_BUSY", message: "The local team is finishing an idea." }), true);
+  assert.equal(isReplayableBridgeEvent({ type: "error", code: "INVALID_MESSAGE", message: "Invalid dashboard message." }), false);
+  assert.equal(isReplayableBridgeEvent({ type: "error", correlationId: "", code: "INVALID_MESSAGE", message: "Invalid dashboard message." }), false);
+});
+
+test("directive length rejections get humane, distinct codes with the salvaged correlation id", () => {
+  const short = ClientMessageSchema.safeParse({ type: "command", correlationId, directive: "  x  " });
+  assert.equal(short.success, false);
+  if (short.success) return assert.fail("expected a rejection");
+  assert.deepEqual(classifyClientMessageRejection({ type: "command", correlationId, directive: "  x  " }, short.error), {
+    code: "IDEA_TOO_SHORT",
+    message: "Your idea needs at least 3 characters.",
+    correlationId,
+  });
+
+  const longFrame = { type: "command", correlationId, directive: "à".repeat(12_001) };
+  const long = ClientMessageSchema.safeParse(longFrame);
+  assert.equal(long.success, false);
+  if (long.success) return assert.fail("expected a rejection");
+  const classified = classifyClientMessageRejection(longFrame, long.error);
+  assert.equal(classified.code, "IDEA_TOO_LONG");
+  assert.equal(classified.message, "Your idea is too long (max 12,000 characters). Split it into two ideas.");
+  assert.equal(classified.correlationId, correlationId);
+});
+
+test("unknown message types and other schema failures classify as INVALID_MESSAGE without echoing zod internals", () => {
+  const unknownFrame = { type: "set_environment", correlationId, name: "X", value: "1" };
+  const unknown = ClientMessageSchema.safeParse(unknownFrame);
+  assert.equal(unknown.success, false);
+  if (unknown.success) return assert.fail("expected a rejection");
+  const unknownClassified = classifyClientMessageRejection(unknownFrame, unknown.error);
+  assert.equal(unknownClassified.code, "INVALID_MESSAGE");
+  assert.equal(unknownClassified.correlationId, correlationId);
+  assert.match(unknownClassified.message, /doesn't recognize that message type/);
+
+  const otherFrame = { type: "fleet_provision", correlationId, profileId: "not-a-profile" };
+  const other = ClientMessageSchema.safeParse(otherFrame);
+  assert.equal(other.success, false);
+  if (other.success) return assert.fail("expected a rejection");
+  const otherClassified = classifyClientMessageRejection(otherFrame, other.error);
+  assert.equal(otherClassified.code, "INVALID_MESSAGE");
+  assert.equal(otherClassified.correlationId, correlationId);
+});
+
+test("correlation id salvage only echoes bounded UUID-shaped strings back to the phone", () => {
+  assert.equal(salvageCorrelationId({ correlationId }), correlationId);
+  assert.equal(salvageCorrelationId({ correlationId: "<script>alert(1)</script>" }), undefined);
+  assert.equal(salvageCorrelationId({ correlationId: "x".repeat(65) }), undefined);
+  assert.equal(salvageCorrelationId({ correlationId: 7 }), undefined);
+  assert.equal(salvageCorrelationId("not-an-object"), undefined);
+  assert.equal(salvageCorrelationId(null), undefined);
 });

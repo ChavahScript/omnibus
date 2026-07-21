@@ -43,6 +43,13 @@ const STREAM_CAP_BYTES = 64 * 1024;
 const GIT_COMMAND_TIMEOUT_MS = 10_000;
 const DIAGNOSTICS_TIMEOUT_MS = 120_000;
 const LLM_TIMEOUT_MS = 20_000;
+/**
+ * Watcher timers fire every poll interval, but a background 7B inference per
+ * poll (~80/hour) would keep the laptop's GPU/memory hot around the clock.
+ * Each watcher gets at most one LLM distillation attempt per this window;
+ * every other poll uses the deterministic heuristics.
+ */
+const WATCHER_LLM_MIN_INTERVAL_MS = 10 * 60 * 1_000;
 const MAX_GIT_PATH_FACTS = 20;
 const MAX_DIAGNOSTIC_FACTS = 10;
 const MAX_LLM_TRIPLES = 6;
@@ -136,6 +143,14 @@ export type AmbientCaptureOptions = {
    * agent inference — so it may use an ungated handle. Defaults to `llm`.
    */
   discussionLlm?: LocalLlm;
+  /**
+   * Capacity gate for LLM distillation: when this returns false (typically
+   * because graph.stats().nodes is near the node cap and new triples would
+   * mostly be dropped or recycled), the LLM triple-extraction call is skipped
+   * entirely and heuristics run instead — the brain must never pay inference
+   * cost for knowledge it cannot keep. Defaults to always-on.
+   */
+  shouldDistill?: () => boolean;
   audit: AuditTrail;
   config: Pick<AppConfig, "secondBrainEnabled" | "ambientGitPollMs" | "ambientCheckCommand" | "ambientCheckIntervalMs">;
   now?: () => Date;
@@ -148,6 +163,7 @@ export class AmbientCaptureService implements AmbientCaptureApi {
   private readonly graph: KnowledgeGraphApi;
   private readonly llm: LocalLlm;
   private readonly discussionLlm: LocalLlm;
+  private readonly shouldDistill: () => boolean;
   private readonly audit: AuditTrail;
   private readonly config: AmbientCaptureOptions["config"];
   private readonly now: () => Date;
@@ -163,6 +179,8 @@ export class AmbientCaptureService implements AmbientCaptureApi {
   private diagnosticsTimer: NodeJS.Timeout | undefined;
   private gitBusy = false;
   private diagnosticsBusy = false;
+  /** Last LLM distillation attempt per watcher, for the rate-limit guard. */
+  private readonly watcherLlmLastAtMs = new Map<string, number>();
   private cursor: CursorState = { version: 1, fingerprint: "", head: null, updatedAt: new Date(0).toISOString() };
 
   public constructor(options: AmbientCaptureOptions) {
@@ -171,6 +189,7 @@ export class AmbientCaptureService implements AmbientCaptureApi {
     this.graph = options.graph;
     this.llm = options.llm;
     this.discussionLlm = options.discussionLlm ?? options.llm;
+    this.shouldDistill = options.shouldDistill ?? (() => true);
     this.audit = options.audit;
     this.config = options.config;
     this.now = options.now ?? (() => new Date());
@@ -255,11 +274,16 @@ export class AmbientCaptureService implements AmbientCaptureApi {
         },
         text: bounded,
       };
-      const triples = await this.tryLlmTriples(
-        `Extract up to ${MAX_LLM_TRIPLES} knowledge triples from this ${input.role} discussion.`,
-        bounded,
-        this.discussionLlm,
-      );
+      // Near the node cap, distilled triples would be dropped or recycled
+      // immediately: skip the inference and let the heuristic single-event
+      // contribution carry the text instead.
+      const triples = this.shouldDistill()
+        ? await this.tryLlmTriples(
+          `Extract up to ${MAX_LLM_TRIPLES} knowledge triples from this ${input.role} discussion.`,
+          bounded,
+          this.discussionLlm,
+        )
+        : null;
       if (triples) contribution.triples = triples;
       await this.graph.mergeContributions([contribution]);
       this.recordCapture();
@@ -286,10 +310,15 @@ export class AmbientCaptureService implements AmbientCaptureApi {
       if (fingerprint === this.cursor.fingerprint) return;
 
       let facts = 0;
-      const triples = await this.tryLlmTriples(
-        `Extract up to ${MAX_LLM_TRIPLES} knowledge triples describing what changed in this git workspace snapshot.`,
-        combined,
-      );
+      // Watcher-timer inference is doubly gated: capacity (shouldDistill) and
+      // the per-watcher rate limit. Order matters — a capacity skip must not
+      // consume the rate-limit window.
+      const triples = this.shouldDistill() && this.watcherLlmAllowed("git")
+        ? await this.tryLlmTriples(
+          `Extract up to ${MAX_LLM_TRIPLES} knowledge triples describing what changed in this git workspace snapshot.`,
+          combined,
+        )
+        : null;
       if (triples) {
         for (const triple of triples) {
           await this.graph.assertFact({
@@ -472,6 +501,21 @@ export class AmbientCaptureService implements AmbientCaptureApi {
   // -------------------------------------------------------------------------
   // Shared helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * At most one LLM distillation attempt per watcher per window, decided on
+   * the injectable clock. The guard is monotonic in effect: a clock that
+   * jumps backwards makes `nowMs < last + window` true, which fails safe
+   * (skip the inference) rather than opening an unbounded burst. Stamped on
+   * attempt, not success — a down Ollama must not be re-probed every poll.
+   */
+  private watcherLlmAllowed(watcher: string): boolean {
+    const nowMs = this.now().getTime();
+    const last = this.watcherLlmLastAtMs.get(watcher);
+    if (last !== undefined && nowMs < last + WATCHER_LLM_MIN_INTERVAL_MS) return false;
+    this.watcherLlmLastAtMs.set(watcher, nowMs);
+    return true;
+  }
 
   /**
    * Model output is untrusted: it is schema-parsed into bounded triples and

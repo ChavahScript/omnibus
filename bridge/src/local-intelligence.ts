@@ -157,10 +157,22 @@ export function requiredLocalModels(config: Pick<AppConfig, "ollamaModel" | "oll
 
 /** Creates private, inspectable local storage before any agent can run. */
 export async function initializeLocalInfrastructure(config: AppConfig): Promise<LocalInfrastructure> {
-  await Promise.all([
-    mkdir(config.auditPath, { recursive: true, mode: 0o700 }),
-    mkdir(config.statePath, { recursive: true, mode: 0o700 }),
-  ]);
+  try {
+    await Promise.all([
+      mkdir(config.auditPath, { recursive: true, mode: 0o700 }),
+      mkdir(config.statePath, { recursive: true, mode: 0o700 }),
+    ]);
+  } catch (error) {
+    // A bare EACCES names neither the directory nor the knob that moves it.
+    // This is the very first write a fresh install performs, so the message
+    // must carry the full remediation on its own.
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new Error(
+      `Could not create the local Omnibus storage directory ${path.dirname(config.auditPath)}`
+      + `${code ? ` (${code})` : ""}. The workspace root is ${config.workspacePath}; `
+      + "make it writable, or set WORKSPACE_ROOT to a directory you can write to.",
+    );
+  }
 
   const markerPath = path.join(config.statePath, "local-intelligence.json");
   let firstRun = false;
@@ -201,8 +213,54 @@ export async function inspectOllama(baseUrl: string): Promise<OllamaInspection> 
       : [];
     return { reachable: true, models };
   } catch (error) {
-    return { reachable: false, models: [], error: errorMessage(error) };
+    return { reachable: false, models: [], error: describeProbeFailure(error) };
   }
+}
+
+/**
+ * Translates a failed service probe into cause-level words. Node's fetch
+ * reports every network failure as an opaque "fetch failed" and hides the
+ * useful ECONNREFUSED/ENOTFOUND code in `error.cause`, which is exactly what
+ * an owner needs to pick between "start Ollama" and "fix the URL".
+ */
+export function describeProbeFailure(error: unknown): string {
+  if (!(error instanceof Error)) return "Unknown local service error.";
+  if (error.name === "TimeoutError" || error.name === "AbortError") return "the connection attempt timed out";
+  const code = extractCauseCode(error.cause);
+  if (code) {
+    const plain: Record<string, string> = {
+      ECONNREFUSED: "connection refused — nothing is listening at that address",
+      ENOTFOUND: "the host name could not be resolved",
+      EHOSTUNREACH: "the host is unreachable from this network",
+      ENETUNREACH: "the network is unreachable",
+      ETIMEDOUT: "the connection timed out",
+      ECONNRESET: "the connection was reset",
+    };
+    return plain[code] ? `${plain[code]} (${code})` : code;
+  }
+  // Some undici failures carry no errno at all (for example its blocked-port
+  // rejection says only "bad port"); the cause message still beats the
+  // opaque top-level "fetch failed".
+  const causeMessage = error.cause instanceof Error ? error.cause.message.trim() : "";
+  if (causeMessage && causeMessage.toLowerCase() !== "fetch failed") {
+    return causeMessage.slice(0, 120);
+  }
+  return error.message;
+}
+
+/** Undici wraps parallel connect attempts in an AggregateError; check both. */
+function extractCauseCode(cause: unknown): string | undefined {
+  if (!cause || typeof cause !== "object") return undefined;
+  const direct = (cause as { code?: unknown }).code;
+  if (typeof direct === "string") return direct;
+  const nested = (cause as { errors?: unknown }).errors;
+  if (Array.isArray(nested)) {
+    for (const entry of nested) {
+      const code = entry && typeof entry === "object" ? (entry as { code?: unknown }).code : undefined;
+      if (typeof code === "string") return code;
+    }
+  }
+  return undefined;
 }
 
 /** Returns model-role assignments that are not yet present in Ollama's local store. */
@@ -222,7 +280,16 @@ export async function ensureOllamaService(
   const firstProbe = await inspectOllama(config.ollamaBaseUrl);
   if (firstProbe.reachable) return { ready: true, startedByBridge: false };
   if (!options.startIfNeeded) {
-    return { ready: false, startedByBridge: false, error: `Ollama is not reachable at ${config.ollamaBaseUrl}.` };
+    // --no-start-ollama means the owner took over service management, so the
+    // failure text must hand back every next step instead of a bare status.
+    return {
+      ready: false,
+      startedByBridge: false,
+      error: `Ollama is not reachable at ${config.ollamaBaseUrl}${firstProbe.error ? ` (${firstProbe.error})` : ""}, `
+        + "and --no-start-ollama told the bridge not to start it. Start Ollama yourself (for example `ollama serve`), "
+        + "re-run without --no-start-ollama to let the bridge start the installed service, "
+        + "or check that OLLAMA_BASE_URL points at the server you meant.",
+    };
   }
   if (!isLoopbackOllamaBaseUrl(config.ollamaBaseUrl)) {
     return {

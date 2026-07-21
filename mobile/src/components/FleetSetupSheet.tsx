@@ -146,7 +146,7 @@ export function FleetSetupSheet({
               <Text style={styles.sectionEyebrow}>LOCAL MODEL PROFILES</Text>
               <Text style={styles.sectionCaption}>Serial local work</Text>
             </View>
-            <Text style={styles.sectionIntro}>Choose a conservative mode for this laptop. The bridge will only pull its approved local Ollama models after your confirmation.</Text>
+            <Text style={styles.sectionIntro}>Choose a conservative mode for this laptop. Your main laptop will only pull its approved local Ollama models after your confirmation.</Text>
 
             <View style={styles.profileList}>
               {snapshot.profiles.map(assessment => {
@@ -229,7 +229,7 @@ function LoadingCapabilityView(): React.JSX.Element {
   return <View style={styles.loading}>
     <View style={styles.loadingMark}><VectorIcon name="bolt" size={19} color={colors.ink} /></View>
     <Text style={styles.loadingTitle}>Reading the local envelope.</Text>
-    <Text style={styles.loadingBody}>The paired bridge is checking safe capacity details before it suggests a model fleet.</Text>
+    <Text style={styles.loadingBody}>Your main laptop is checking safe capacity details before it suggests a model fleet.</Text>
   </View>;
 }
 
@@ -328,7 +328,7 @@ function ResearchConfiguration({
     accessibilityLabel="Enable cited web research on this paired laptop"
   >
     <View style={[styles.researchIcon, snapshot.research.enabled && styles.researchIconEnabled]}><VectorIcon name="research" size={18} color={snapshot.research.enabled ? colors.ink : colors.paper} /></View>
-    <View style={styles.researchCopy}><Text style={[styles.researchTitle, snapshot.research.enabled && styles.researchTitleEnabled]}>CITED WEB RESEARCH {snapshot.research.enabled ? "ON" : "OFF"}</Text><Text style={[styles.researchBody, snapshot.research.enabled && styles.researchBodyEnabled]}>{snapshot.research.enabled ? "The paired bridge can use its configured provider when you explicitly turn research on for an idea." : "A provider key is already saved privately on the laptop. Tap to enable it for future explicitly consented ideas."}</Text></View>
+    <View style={styles.researchCopy}><Text style={[styles.researchTitle, snapshot.research.enabled && styles.researchTitleEnabled]}>CITED WEB RESEARCH {snapshot.research.enabled ? "ON" : "OFF"}</Text><Text style={[styles.researchBody, snapshot.research.enabled && styles.researchBodyEnabled]}>{snapshot.research.enabled ? "Your main laptop can use its configured provider when you explicitly turn research on for an idea." : "A provider key is already saved privately on the laptop. Tap to enable it for future explicitly consented ideas."}</Text></View>
     <View style={[styles.researchSwitch, snapshot.research.enabled && styles.researchSwitchEnabled]}><View style={[styles.researchKnob, snapshot.research.enabled && styles.researchKnobEnabled]} /></View>
   </Pressable>;
 
@@ -355,7 +355,7 @@ function ResearchConfiguration({
         style={styles.keyInput}
         accessibilityLabel="Brave Search API key"
       />
-      <Text style={styles.keyNote}>Sent once through the authenticated laptop link, then saved only in the bridge’s private local settings file.</Text>
+      <Text style={styles.keyNote}>Sent once through the authenticated laptop link, then saved only in your main laptop’s private local settings file.</Text>
       <Pressable onPress={onConnect} disabled={busy || braveSearchApiKey.trim().length < 10} style={({ pressed }) => [styles.connectKey, (busy || braveSearchApiKey.trim().length < 10) && styles.connectKeyDisabled, pressed && !busy && braveSearchApiKey.trim().length >= 10 && styles.pressed]} accessibilityRole="button" accessibilityState={{ disabled: busy || braveSearchApiKey.trim().length < 10 }} accessibilityLabel="Connect Brave Search and enable research">
         <VectorIcon name="research" size={15} color={busy || braveSearchApiKey.trim().length < 10 ? colors.paperMuted : colors.ink} /><Text style={[styles.connectKeyText, (busy || braveSearchApiKey.trim().length < 10) && styles.connectKeyTextDisabled]}>CONNECT BRAVE & ENABLE</Text>
       </Pressable>
@@ -413,7 +413,7 @@ function HomeFleetConfiguration({
     <Text style={styles.homeFleetSafety}>Use a trusted home LAN only — pairing is authenticated, but Home Fleet does not encrypt review text. Never use public Wi-Fi, guest networks, port forwarding, or the public phone tunnel.</Text>
     {!homeFleet.available ? <View style={styles.homeFleetUnavailable}>
       <Text style={styles.homeFleetUnavailableTitle}>HOME FLEET IS NOT AVAILABLE</Text>
-      <Text style={styles.homeFleetUnavailableBody}>The paired laptop could not open its private-LAN coordinator. Keep the bridge running, check its terminal, then refresh this sheet.</Text>
+      <Text style={styles.homeFleetUnavailableBody}>Your main laptop could not open its home-network link. Keep the laptop link running, check the laptop's terminal, then refresh this sheet.</Text>
     </View> : <>
       <Pressable
         onPress={onCreateInvite}
@@ -421,24 +421,24 @@ function HomeFleetConfiguration({
         style={({ pressed }) => [styles.homeFleetInvite, !canInvite && styles.homeFleetInviteDisabled, pressed && canInvite && styles.pressed]}
         accessibilityRole="button"
         accessibilityState={{ disabled: !canInvite, busy }}
-        accessibilityLabel="Create a one-time home worker invitation"
+        accessibilityLabel="Create a one-time home laptop invitation"
       >
         <VectorIcon name="phone" size={16} color={canInvite ? colors.ink : colors.paperMuted} />
-        <Text style={[styles.homeFleetInviteText, !canInvite && styles.homeFleetInviteTextDisabled]}>{busy ? "CONTACTING COORDINATOR…" : atWorkerLimit ? "CREATE REPAIR INVITE" : "CREATE WORKER INVITE"}</Text>
+        <Text style={[styles.homeFleetInviteText, !canInvite && styles.homeFleetInviteTextDisabled]}>{busy ? "CONTACTING YOUR MAIN LAPTOP…" : atWorkerLimit ? "RE-PAIR A HOME LAPTOP" : "INVITE A HOME LAPTOP"}</Text>
       </Pressable>
-      {atWorkerLimit ? <Text style={styles.homeFleetSafety}>The fleet is full. This repair command can re-pair an existing worker after a network change; remove a worker before adding a new laptop.</Text> : null}
+      {atWorkerLimit ? <Text style={styles.homeFleetSafety}>The fleet is full. This re-pair command can reconnect an existing home laptop after a network change; remove a home laptop before adding a new one.</Text> : null}
       {invite ? <View style={styles.inviteCard}>
-        <View style={styles.inviteHeader}><Text style={styles.inviteLabel}>ONE-TIME WORKER COMMAND</Text><Text style={styles.inviteExpiry}>EXPIRES {readableExpiry(invite.expiresAt)}</Text></View>
+        <View style={styles.inviteHeader}><Text style={styles.inviteLabel}>ONE-TIME HOME LAPTOP COMMAND</Text><Text style={styles.inviteExpiry}>EXPIRES {readableExpiry(invite.expiresAt)}</Text></View>
         <Text selectable numberOfLines={4} style={styles.inviteCommand}>{invite.command}</Text>
         <Text style={styles.inviteNote}>Copy this into Terminal or Windows PowerShell on one spare laptop you control, while both laptops are on this same private network.</Text>
-        <Pressable onPress={() => { void copyInvite(); }} style={({ pressed }) => [styles.copyInvite, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Copy home worker command">
+        <Pressable onPress={() => { void copyInvite(); }} style={({ pressed }) => [styles.copyInvite, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="Copy home laptop command">
           <VectorIcon name="copy" size={15} color={colors.ink} /><Text style={styles.copyInviteText}>{copied ? "COPIED" : copyError ? "COPY UNAVAILABLE" : "COPY COMMAND"}</Text>
         </Pressable>
       </View> : null}
       {homeFleet.workers.length ? <View style={styles.workerList}>
         {homeFleet.workers.map(worker => <View key={worker.id} style={styles.workerRow}>
           <View style={[styles.workerDot, worker.status === "online" && worker.modelReady && worker.approved && styles.workerDotReady]} />
-          <View style={styles.workerCopy}><Text style={styles.workerLabel}>{worker.label.toUpperCase()}</Text><Text style={styles.workerMeta}>PRIVATE LAN / {!worker.approved ? "AWAITING APPROVAL" : worker.status === "online" && worker.modelReady ? "READY" : worker.status === "needs-model" ? "MODEL NEEDED" : "OFFLINE"}</Text></View>
+          <View style={styles.workerCopy}><Text style={styles.workerLabel}>{worker.label.toUpperCase()}</Text><Text style={styles.workerMeta}>HOME NETWORK / {!worker.approved ? "AWAITING APPROVAL" : worker.status === "online" && worker.modelReady ? "READY" : worker.status === "needs-model" ? "MODEL NEEDED" : "OFFLINE"}</Text></View>
           {!worker.approved ? <Pressable onPress={() => onApproveWorker(worker.id)} disabled={busy || !worker.modelReady || worker.status !== "online"} style={({ pressed }) => [styles.workerApprove, (busy || !worker.modelReady || worker.status !== "online") && styles.workerApproveDisabled, pressed && !busy && worker.modelReady && worker.status === "online" && styles.pressed]} accessibilityRole="button" accessibilityState={{ disabled: busy || !worker.modelReady || worker.status !== "online" }} accessibilityLabel={`Approve ${worker.label} for home fleet peer review`}><Text style={[styles.workerApproveText, (busy || !worker.modelReady || worker.status !== "online") && styles.workerApproveTextDisabled]}>ACTIVATE</Text></Pressable> : null}
           <Pressable onPress={() => onRemoveWorker(worker.id)} disabled={busy} style={({ pressed }) => [styles.workerRemove, pressed && !busy && styles.pressed, busy && styles.muted]} accessibilityRole="button" accessibilityLabel={`Remove ${worker.label} from the home fleet`}><VectorIcon name="close" size={13} color={colors.paper} /></Pressable>
         </View>)}
@@ -466,6 +466,7 @@ function SecondBrainStatusView({ brain }: { brain: BrainStatus | null }): React.
       : !brain.enabled ? <Text style={styles.homeFleetEmpty}>The Second Brain is disabled on the laptop (OMNIBUS_SECOND_BRAIN=false). Ideas still work statelessly.</Text>
         : <>
           <View style={styles.brainMetrics}>
+            {brain.capacityTier ? <Metric label="SIZED FOR" value={brain.capacityTier.toUpperCase()} detail="fits this laptop" /> : null}
             <Metric label="GIT WATCH" value={watcherText(brain.watchers.git)} />
             <Metric label="DIAGNOSTICS" value={watcherText(brain.watchers.diagnostics)} />
             <Metric label="ANTI-PATTERNS" value={`${brain.antiPatterns}`} />
@@ -474,8 +475,10 @@ function SecondBrainStatusView({ brain }: { brain: BrainStatus | null }): React.
           {brain.lastRetrieval ? <Text style={styles.homeFleetSafety}>Last idea recalled {brain.lastRetrieval.facts} linked memor{brain.lastRetrieval.facts === 1 ? "y" : "ies"} across {brain.lastRetrieval.entityCount} matched concept{brain.lastRetrieval.entityCount === 1 ? "" : "s"}.</Text> : null}
           <Text style={styles.homeFleetSafety}>
             {brain.fleetCache.sharingEnabled
-              ? `Fleet context cache: ${brain.fleetCache.bundleReady ? "bundle ready" : "compiling"} · ${brain.fleetCache.workersWarm} worker${brain.fleetCache.workersWarm === 1 ? "" : "s"} pre-warmed for faster peer reviews.`
-              : "Fleet context sharing is off (laptop-side HOME_FLEET_CONTEXT_SHARING). Home workers keep receiving idea text only."}
+              ? brain.fleetCache.bundleReady
+                ? `Fleet context cache: bundle ready · ${brain.fleetCache.workersWarm} home laptop${brain.fleetCache.workersWarm === 1 ? "" : "s"} pre-warmed for faster peer reviews.`
+                : "Fleet context cache: no context bundle yet — it compiles from distilled facts after a few ideas."
+              : "Fleet context sharing is off (laptop-side HOME_FLEET_CONTEXT_SHARING). Home laptops keep receiving idea text only."}
           </Text>
         </>}
   </View>;

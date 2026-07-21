@@ -52,6 +52,13 @@ export class CommandOrchestrator {
   private readonly queue: DurableCommandQueue;
   private readonly liveSinks = new Map<string, CommandEventSink>();
   private draining = false;
+  /**
+   * True from drain start until the current job's terminal frame is emitted.
+   * `isBusy` reads this instead of `draining` so fleet provisioning is held
+   * off whenever local inference could start or is running, but is not
+   * refused during the brief post-result bookkeeping tail of a drain pass.
+   */
+  private inferenceActive = false;
   private retryTimer: NodeJS.Timeout | undefined;
   private stopped = false;
   private fleetPaused = false;
@@ -83,7 +90,15 @@ export class CommandOrchestrator {
     try {
       queued = await this.queue.enqueue(command, ownerScope);
     } catch (error) {
-      emit({ type: "error", correlationId: command.correlationId, code: "QUEUE_UNAVAILABLE", message: errorMessage(error) });
+      // The phone gets a neutral notice: a storage failure's raw text (Zod
+      // issues, filesystem paths) belongs in the local audit trail only.
+      emit({
+        type: "error",
+        correlationId: command.correlationId,
+        code: "QUEUE_UNAVAILABLE",
+        message: "The local queue storage is unavailable. Check the bridge terminal.",
+      });
+      void this.auditUnexpectedQueueError(error);
       return;
     }
     if (!queued.accepted) {
@@ -162,7 +177,7 @@ export class CommandOrchestrator {
    * model pull alongside active agent inference.
    */
   public get isBusy(): boolean {
-    return this.draining;
+    return this.inferenceActive;
   }
 
   /**
@@ -191,10 +206,12 @@ export class CommandOrchestrator {
       this.retryTimer = undefined;
     }
     this.draining = true;
+    this.inferenceActive = true;
     void this.processOne()
       .catch(error => this.auditUnexpectedQueueError(error))
       .finally(() => {
         this.draining = false;
+        this.inferenceActive = false;
         void this.scheduleNext();
       });
   }
@@ -265,6 +282,9 @@ export class CommandOrchestrator {
         status("marketing", "create", "Marketing/Ops is preparing an official Higgsfield job.");
         const summary = await marketing.createVideo(correlationId, command.directive, text => status("marketing", "progress", text));
         await this.memory.append(correlationId, "marketing", "result", summary, ownerScope);
+        // Inference is over; release the fleet-provisioning gate before the
+        // phone sees the result so an immediate follow-up is not refused.
+        this.inferenceActive = false;
         emit({ type: "result", correlationId, agent: "marketing", summary: `${summary}\n\n${marketing.distributionBoundary()}` });
       } else {
         let webResearch: WebResearchResult | undefined;
@@ -303,7 +323,14 @@ export class CommandOrchestrator {
             knowledgeContext = undefined;
           }
         }
-        const audited = await auditor.enrich(correlationId, command.directive, priorContext, webResearch, knowledgeContext);
+        const audited = await auditor.enrich(
+          correlationId,
+          command.directive,
+          priorContext,
+          webResearch,
+          knowledgeContext,
+          text => status("auditor", "audit_progress", text),
+        );
         await this.memory.append(correlationId, "auditor", "rationale_summary", audited.rationaleSummary, ownerScope);
         status("auditor", "complete", audited.riskSummary.join(" · ") || "Local audit complete.");
 
@@ -359,6 +386,9 @@ export class CommandOrchestrator {
         const antiPatternNote = this.brain?.antiPatternAppendix(summary);
         if (antiPatternNote) summary = `${summary}\n\n${antiPatternNote}`;
         await this.memory.append(correlationId, "developer", "result", summary, ownerScope);
+        // Inference is over; release the fleet-provisioning gate before the
+        // phone sees the result so an immediate follow-up is not refused.
+        this.inferenceActive = false;
         emit({ type: "result", correlationId, agent: "developer", summary });
         capturedOutcome = {
           ...(audited.rationaleSummary ? { rationaleSummary: audited.rationaleSummary } : {}),
@@ -413,6 +443,9 @@ export class CommandOrchestrator {
     status: (agent: AgentName, stage: string, text: string) => void,
     message: string,
   ): Promise<void> {
+    // Inference for this attempt is over either way; release the
+    // fleet-provisioning gate before any frame reaches the phone.
+    this.inferenceActive = false;
     let settled;
     try {
       settled = await this.queue.fail(job.id, message);
@@ -425,28 +458,44 @@ export class CommandOrchestrator {
 
     const correlationId = job.command.correlationId;
     if (settled.retry) {
+      status("system", "retrying", `Local workflow paused; retry ${settled.job.attempts + 1} of ${settled.job.maxAttempts} is scheduled.`);
+      try {
+        await this.audit.append({
+          at: new Date().toISOString(),
+          correlationId,
+          agent: "system",
+          event: "command_retry_scheduled",
+          data: { attempt: settled.job.attempts, maxAttempts: settled.job.maxAttempts, delayMs: settled.delayMs, message },
+        });
+        await this.memory.append(correlationId, "system", "queue_retry", `attempt=${settled.job.attempts}; retryInMs=${settled.delayMs}; error=${message}`, job.ownerScope);
+      } catch (observabilityError) {
+        await this.auditUnexpectedQueueError(observabilityError);
+      }
+      return;
+    }
+
+    // The terminal error frame is emitted before the best-effort audit and
+    // memory writes: a broken observability volume must never eat the failure
+    // notice the phone is waiting on. Each write is guarded independently so
+    // a failed audit append cannot suppress the memory record or vice versa.
+    emit({ type: "error", correlationId, code: "COMMAND_FAILED", message });
+    this.liveSinks.delete(correlationId);
+    try {
       await this.audit.append({
         at: new Date().toISOString(),
         correlationId,
         agent: "system",
-        event: "command_retry_scheduled",
-        data: { attempt: settled.job.attempts, maxAttempts: settled.job.maxAttempts, delayMs: settled.delayMs, message },
+        event: "command_failed",
+        data: { attempts: settled.job.attempts, maxAttempts: settled.job.maxAttempts, message },
       });
-      await this.memory.append(correlationId, "system", "queue_retry", `attempt=${settled.job.attempts}; retryInMs=${settled.delayMs}; error=${message}`, job.ownerScope);
-      status("system", "retrying", `Local workflow paused; retry ${settled.job.attempts + 1} of ${settled.job.maxAttempts} is scheduled.`);
-      return;
+    } catch (observabilityError) {
+      await this.auditUnexpectedQueueError(observabilityError);
     }
-
-    await this.audit.append({
-      at: new Date().toISOString(),
-      correlationId,
-      agent: "system",
-      event: "command_failed",
-      data: { attempts: settled.job.attempts, maxAttempts: settled.job.maxAttempts, message },
-    });
-    await this.memory.append(correlationId, "system", "queue_failed", `attempts=${settled.job.attempts}; error=${message}`, job.ownerScope);
-    emit({ type: "error", correlationId, code: "COMMAND_FAILED", message });
-    this.liveSinks.delete(correlationId);
+    try {
+      await this.memory.append(correlationId, "system", "queue_failed", `attempts=${settled.job.attempts}; error=${message}`, job.ownerScope);
+    } catch (observabilityError) {
+      await this.auditUnexpectedQueueError(observabilityError);
+    }
   }
 
   private async auditUnexpectedQueueError(error: unknown): Promise<void> {

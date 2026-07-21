@@ -77,6 +77,10 @@ export class SecondBrain {
       // the model directly.
       llm: this.gatedLlm(),
       discussionLlm: this.llm,
+      // Capacity truth for distillation: past 90% of the node cap, new
+      // triples would land in the drop/recycle path, so ambient capture must
+      // stop paying LLM cost and fall back to heuristics.
+      shouldDistill: () => this.graph.stats().nodes < Math.floor(config.brainMaxNodes * 0.9),
       audit,
       config,
     });
@@ -236,6 +240,7 @@ export class SecondBrain {
     };
     return {
       enabled: this.enabled,
+      capacityTier: this.config.brainCapacityTier,
       nodes: stats.nodes,
       facts: stats.currentFacts,
       invalidatedFacts: stats.invalidatedFacts,
@@ -255,12 +260,19 @@ export class SecondBrain {
     };
   }
 
-  /** Wraps the LLM so background distillation defers to live inference. */
+  /**
+   * Wraps the LLM so background distillation defers to live inference, and
+   * pins keep_alive to "0" for every watcher-originated call: an
+   * opportunistic background inference must never leave the multi-gigabyte
+   * model resident between polls. Discussion capture (job lifecycle) uses
+   * the unwrapped handle and keeps the configured residency.
+   */
   private gatedLlm(): LocalLlm {
     const inner = this.llm;
     const busy = () => this.inferenceBusy();
     return {
-      generateJson: async (prompt, options) => busy() ? null : inner.generateJson(prompt, options),
+      generateJson: async (prompt, options) =>
+        busy() ? null : inner.generateJson(prompt, { ...options, keepAlive: "0" }),
       available: async () => busy() ? false : inner.available(),
     };
   }

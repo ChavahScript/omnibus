@@ -93,6 +93,11 @@ function makeRunCommand(handlers: {
     while (args[0] === "-c") args.splice(0, 2);
     calls.push({ command, args });
     if (handlers.delayMs) await new Promise(resolve => setTimeout(resolve, handlers.delayMs));
+    // The gate probes repository membership before listing staged files.
+    if (args[0] === "rev-parse") {
+      if (handlers.failList) return { ok: false, stdout: "", stderr: "fatal: not a git repository", exitCode: 128 };
+      return { ok: true, stdout: "true\n", stderr: "" };
+    }
     if (args[0] === "diff") {
       if (handlers.failList) return { ok: false, stdout: "", stderr: "fatal: not a git repository" };
       return { ok: true, stdout: `${(handlers.staged ?? []).join("\n")}\n`, stderr: "" };
@@ -456,6 +461,44 @@ test("advisory layer appends warnings but can never block, and its errors are sw
     assert.equal(junk.ok, true);
     assert.ok(!junk.report.includes("ADVISORY"));
     assert.ok(!junk.report.includes("rm -rf"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("foreign-hook refusal names the exact --force flag to type", async () => {
+  const dir = await makeRepoDir();
+  const hookPath = path.join(dir, ".git", "hooks", "pre-commit");
+  try {
+    await writeFile(hookPath, "#!/bin/sh\necho custom-lint\n", { mode: 0o755 });
+    const result = await installPreCommitHook(dir);
+    assert.equal(result.installed, false);
+    assert.match(result.reason ?? "", /Re-run with --force/);
+    assert.doesNotMatch(result.reason ?? "", /Re-run with force to/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("staged-file listing outside a git repository reports the real cause", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "omnibus-precommit-"));
+  try {
+    // git's own stderr wording identifies the situation.
+    const byStderr: RunCommand = async () => ({ ok: false, stdout: "", stderr: "fatal: not a git repository (or any of the parent directories): .git" });
+    const stderrOutcome = await runPreCommitCheck({ workspacePath: dir, registry: makeRegistry(), timeoutMs: 5_000, runCommand: byStderr });
+    assert.equal(stderrOutcome.ok, true);
+    assert.match(stderrOutcome.report, /not a git repository/i);
+    assert.doesNotMatch(stderrOutcome.report, /git unavailable or timed out/);
+
+    // Exit status 128 alone is enough, even without stderr text.
+    const byExitCode: RunCommand = async () => ({ ok: false, stdout: "", stderr: "", exitCode: 128 });
+    const codeOutcome = await runPreCommitCheck({ workspacePath: dir, registry: makeRegistry(), timeoutMs: 5_000, runCommand: byExitCode });
+    assert.match(codeOutcome.report, /not a git repository/i);
+
+    // A genuinely broken git keeps blaming the tooling, not the repository.
+    const toolingFailure: RunCommand = async () => ({ ok: false, stdout: "", stderr: "spawn git ENOENT", exitCode: 1 });
+    const toolingOutcome = await runPreCommitCheck({ workspacePath: dir, registry: makeRegistry(), timeoutMs: 5_000, runCommand: toolingFailure });
+    assert.match(toolingOutcome.report, /unavailable or timed out/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

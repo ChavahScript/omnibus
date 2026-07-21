@@ -22,11 +22,17 @@ import {
  *
  * Two design commitments shape everything here:
  *
- * 1. Nothing is ever deleted or overwritten. A contradicted fact is
- *    bi-temporally invalidated — its transaction interval is closed — so an
- *    "as of" query can still explain what the bridge believed at any past
- *    moment. Deprecated architecture decisions remain inspectable evidence,
- *    not lost history.
+ * 1. History is never destroyed, but the LIVE journal bounds RAM. A
+ *    contradicted fact is bi-temporally invalidated — its transaction
+ *    interval is closed — so an "as of" query can still explain what the
+ *    bridge believed at any past moment. Compaction moves only the oldest
+ *    invalidated records into a cold, append-only archive
+ *    (graph-archive.ndjson) that is never loaded: the live journal bounds
+ *    RAM; complete history survives in the cold archive. The one bounded
+ *    exception on the node side: spent kind='event' nodes (every fact
+ *    invalidated) may be retired via a journaled retire-node op to make room
+ *    for NEW learning at the node cap — the retirement itself is history,
+ *    and durable kinds (entity/decision/bugfix/…) are never recycled.
  *
  * 2. Every identifier is content-derived. Node ids hash (kind, normalized
  *    name); fact ids hash (contentHash, txCreatedAt); merge application order
@@ -58,8 +64,11 @@ type AssertFactInput = Parameters<KnowledgeGraphApi["assertFact"]>[0];
 
 export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
   private readonly journalPath: string;
+  /** Cold archive: append-only overflow of old invalidated facts; never loaded. */
+  private readonly archivePath: string;
   private readonly maxNodes: number;
   private readonly maxFacts: number;
+  private readonly compactSlackLines: number;
   private readonly now: () => Date;
 
   private loaded = false;
@@ -85,11 +94,16 @@ export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
 
   public constructor(
     private readonly brainDir: string,
-    options: { maxNodes?: number; maxFacts?: number; now?: () => Date } = {},
+    options: { maxNodes?: number; maxFacts?: number; now?: () => Date; compactSlackLines?: number } = {},
   ) {
     this.journalPath = path.join(brainDir, "graph.ndjson");
+    this.archivePath = path.join(brainDir, "graph-archive.ndjson");
     this.maxNodes = options.maxNodes ?? 4_000;
     this.maxFacts = options.maxFacts ?? 12_000;
+    // Extra journal lines tolerated beyond 2x the retained records before a
+    // compaction rewrite; injectable so tests can exercise compaction without
+    // thousand-line journals.
+    this.compactSlackLines = options.compactSlackLines ?? 1_024;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -332,8 +346,13 @@ export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
   private async assertFactAt(input: AssertFactInput, txCreatedAt: string): Promise<{ fact: BrainFact; created: boolean }> {
     // Node capacity is checked before minting: a fact that would push the
     // graph past maxNodes is dropped (and counted) rather than referencing
-    // nodes the journal never recorded.
+    // nodes the journal never recorded. Before dropping, spent event nodes
+    // are recycled so the brain keeps learning at the cap instead of
+    // silently stalling forever.
     const neededNodes = this.countMissingNodes([input.subject, input.object]);
+    if (neededNodes > 0 && this.nodesById.size + neededNodes > this.maxNodes) {
+      await this.recycleSpentEventNodes(this.nodesById.size + neededNodes - this.maxNodes, txCreatedAt);
+    }
     if (this.nodesById.size + neededNodes > this.maxNodes) {
       this.droppedForNodeCapacity += 1;
       const placeholder: BrainFact = {
@@ -433,6 +452,42 @@ export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
     return { fact: this.factsById.get(id) ?? fact, created: true };
   }
 
+  /**
+   * Event nodes are digests of moments, not durable concepts: once every
+   * fact touching one has been bi-temporally invalidated, the node carries
+   * no current belief. When node capacity would block a NEW fact, the oldest
+   * such spent event nodes are retired — journaled as retire-node ops so
+   * replay converges — freeing identity slots for fresh learning. Only
+   * kind='event' is ever recyclable; entities, decisions, and bug fixes are
+   * durable knowledge and stay.
+   */
+  private async recycleSpentEventNodes(slots: number, at: string): Promise<void> {
+    if (slots <= 0) return;
+    const victims = [...this.nodesById.values()]
+      .filter(node => node.kind === "event" && this.nodeFullyInvalidated(node.id))
+      .sort(compareTxThenId)
+      .slice(0, slots);
+    for (const node of victims) {
+      await this.record({
+        op: "retire-node",
+        at,
+        nodeId: node.id,
+        reason: "recycled: all facts invalidated, node capacity needed",
+      });
+    }
+  }
+
+  /** True when no current fact still references this node. */
+  private nodeFullyInvalidated(nodeId: string): boolean {
+    const factIds = this.adjacency.get(nodeId);
+    if (!factIds || factIds.size === 0) return true;
+    for (const factId of factIds) {
+      const fact = this.factsById.get(factId);
+      if (fact && fact.txInvalidatedAt === null) return false;
+    }
+    return true;
+  }
+
   /** How many of these node identities do not exist yet. */
   private countMissingNodes(inputs: AssertNodeInput[]): number {
     const keys = new Set<string>();
@@ -496,6 +551,17 @@ export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
       if (fact.txInvalidatedAt === null) this.currentCount += 1;
       return;
     }
+    if (entry.op === "retire-node") {
+      // Recycled event node: drop it from every index so its identity slot
+      // frees up. Its (already invalidated) facts stay readable for as-of
+      // queries; only edge navigation through the retired node ends.
+      const node = this.nodesById.get(entry.nodeId);
+      if (!node) return;
+      this.nodesById.delete(entry.nodeId);
+      this.nodeIdByKey.delete(`${node.kind}|${node.normalizedName}`);
+      this.adjacency.delete(entry.nodeId);
+      return;
+    }
     const fact = this.factsById.get(entry.factId);
     if (!fact || fact.txInvalidatedAt !== null) return;
     fact.txInvalidatedAt = entry.at;
@@ -529,34 +595,85 @@ export class BiTemporalKnowledgeGraph implements KnowledgeGraphApi {
   }
 
   /**
-   * Compact only when the journal carries meaningfully more lines than live
-   * records. A fixed threshold would thrash once retained history alone
-   * exceeded it — every append would trigger a full O(journal) rewrite.
+   * Compact only when the journal carries meaningfully more lines than the
+   * records compaction would keep LIVE. The retained-fact term is capped at
+   * the inline budget (2x maxFacts): counting the full invalidated backlog
+   * would let the threshold recede forever ahead of the journal, making
+   * compaction — and therefore the RAM/journal bound — unreachable.
    */
   private shouldCompact(): boolean {
-    const retained = this.nodesById.size + this.factsById.size;
-    return this.journalLines > retained * 2 + 1_024;
+    const retained = this.nodesById.size + Math.min(this.factsById.size, this.inlineFactBudget());
+    return this.journalLines > retained * 2 + this.compactSlackLines;
+  }
+
+  /** Fact records (current + newest invalidated) the live journal keeps. */
+  private inlineFactBudget(): number {
+    return this.maxFacts * 2;
   }
 
   /**
-   * Journal compaction is a pure re-serialization of live memory: nothing is
-   * summarized away, invalidated facts keep their closed transaction
-   * intervals inline. Atomic tmp-write + rename so a crash mid-compaction
+   * Journal compaction bounds the live journal (and therefore RAM): current
+   * facts always stay inline, plus the newest invalidated facts up to the
+   * inline budget so recent as-of queries still answer from memory. Older
+   * invalidated facts are appended — with their closed transaction intervals
+   * intact — to the cold archive (graph-archive.ndjson), which is append-only
+   * and never loaded: the live journal bounds RAM; complete history survives
+   * in the cold archive. Atomic tmp-write + rename so a crash mid-compaction
    * leaves the previous journal intact.
+   *
+   * Concurrency guard: two processes can legitimately open one brainDir (the
+   * pre-commit hook check while the bridge runs). Before rewriting, the
+   * on-disk line count is re-read; if it exceeds what this instance has
+   * appended, another writer landed entries we never replayed — the rename
+   * would silently discard them, so this compaction cycle aborts instead.
    */
   private async compact(): Promise<void> {
+    let diskLines = 0;
+    try {
+      const onDisk = await readFile(this.journalPath, "utf8");
+      for (const line of onDisk.split("\n")) if (line.trim()) diskLines += 1;
+    } catch {
+      diskLines = 0; // Missing/unreadable journal: nothing of anyone else's to clobber.
+    }
+    if (diskLines > this.journalLines) return;
+
+    const current: BrainFact[] = [];
+    const invalidated: BrainFact[] = [];
+    for (const fact of this.factsById.values()) {
+      (fact.txInvalidatedAt === null ? current : invalidated).push(fact);
+    }
+    // Newest invalidations stay inline; the oldest overflow goes cold.
+    invalidated.sort((a, b) =>
+      compareStrings(b.txInvalidatedAt ?? "", a.txInvalidatedAt ?? "") || compareStrings(b.id, a.id));
+    const keepInvalidated = invalidated.slice(0, Math.max(0, this.inlineFactBudget() - current.length));
+    const archived = invalidated.slice(keepInvalidated.length);
+
     const lines: string[] = [];
     for (const node of [...this.nodesById.values()].sort(compareTxThenId)) {
       lines.push(JSON.stringify({ op: "node", at: node.txCreatedAt, node } satisfies BrainJournalEntry));
     }
-    for (const fact of [...this.factsById.values()].sort(compareTxThenId)) {
+    for (const fact of [...current, ...keepInvalidated].sort(compareTxThenId)) {
       lines.push(JSON.stringify({ op: "fact", at: fact.txCreatedAt, fact } satisfies BrainJournalEntry));
     }
     await mkdir(this.brainDir, { recursive: true, mode: 0o700 });
+    if (archived.length > 0) {
+      const archiveLines = archived
+        .sort(compareTxThenId)
+        .map(fact => JSON.stringify({ op: "fact", at: fact.txCreatedAt, fact } satisfies BrainJournalEntry));
+      await appendFile(this.archivePath, `${archiveLines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+    }
     const temporary = `${this.journalPath}.${process.pid}.tmp`;
     await writeFile(temporary, lines.length ? `${lines.join("\n")}\n` : "", { encoding: "utf8", mode: 0o600 });
     await rename(temporary, this.journalPath);
     this.journalLines = lines.length;
+    // Prune archived facts from memory only after the rename landed, so a
+    // failed rewrite leaves the in-memory image matching the intact journal.
+    for (const fact of archived) {
+      this.factsById.delete(fact.id);
+      if (this.factIdByContentHash.get(fact.contentHash) === fact.id) this.factIdByContentHash.delete(fact.contentHash);
+      this.adjacency.get(fact.subjectId)?.delete(fact.id);
+      this.adjacency.get(fact.objectId)?.delete(fact.id);
+    }
   }
 }
 

@@ -118,6 +118,8 @@ export type BrainWatcherState = "active" | "unavailable" | "disabled";
 
 export type BrainStatus = {
   enabled: boolean;
+  /** Adaptive sizing tier the laptop chose for itself; a label, not specs. */
+  capacityTier?: "compact" | "balanced" | "power" | "studio";
   nodes: number;
   facts: number;
   invalidatedFacts: number;
@@ -168,4 +170,68 @@ export type DashboardMessage = {
   at: Date;
   /** A command's stable identity keeps progress isolated to that idea. */
   correlationId?: string;
+  /**
+   * Set on feed entries derived from a bridge `error` event. The composer
+   * treats ANY error carrying the active idea's correlationId as terminal, so
+   * new bridge error codes can never leave the phone stuck in "shaping".
+   */
+  origin?: "error";
 };
+
+/** The composer's whole lifecycle for one idea; there is no hidden state. */
+export type IdeaPhase = "idle" | "shaping" | "ready" | "failed";
+
+/**
+ * Mirror of the bridge's command schema bounds (`z.string().trim().min(3)
+ * .max(12_000)`). Checking them on-device keeps a locally-invalid idea out of
+ * the shaping state entirely: the bridge would reject it, and its rejection
+ * may race a flaky link, which previously stranded the composer.
+ */
+export const IDEA_MIN_CHARS = 3;
+export const IDEA_MAX_CHARS = 12_000;
+
+/** Returns inline composer copy for a locally-invalid idea, or null if it may be sent. */
+export function localIdeaIssue(trimmedIdea: string): string | null {
+  if (trimmedIdea.length < IDEA_MIN_CHARS) return "Give the idea at least 3 characters.";
+  if (trimmedIdea.length > IDEA_MAX_CHARS) return "Ideas are limited to 12,000 characters — split this one.";
+  return null;
+}
+
+/**
+ * Any bridge error scoped to the active idea ends that idea. This is
+ * deliberately code-agnostic: an allowlist of stages silently missed
+ * FLEET_PROVISIONING, COMMAND_QUEUE_FULL, QUEUE_UNAVAILABLE,
+ * DUPLICATE_COMMAND, IDEA_TOO_LONG, and IDEA_TOO_SHORT.
+ */
+export function isIdeaTerminalFailure(message: DashboardMessage, activeCorrelationId: string): boolean {
+  return message.origin === "error" && message.correlationId === activeCorrelationId;
+}
+
+/**
+ * A brief may arrive for an idea the app already marked failed — reconnect
+ * replay delivers results the phone missed while offline. Accepting the
+ * result in the failed phase upgrades the card instead of discarding a
+ * recovered brief.
+ */
+export function acceptsRecoveredBrief(phase: IdeaPhase): boolean {
+  return phase === "shaping" || phase === "failed";
+}
+
+/** What the phone remembers about the moment a home-laptop invite was created. */
+export type HomeFleetInviteTracking = {
+  /** Paired laptop count when the invite arrived; growth means it was used. */
+  workerCountAtCreation: number;
+  /** True once a snapshot has confirmed the invite's expiry window. */
+  inviteSeenInSnapshot: boolean;
+};
+
+/**
+ * An invite card is stale once the coordinator no longer honors it: a laptop
+ * joined with it, or its expiry window disappeared from the fleet snapshot.
+ * The `inviteSeenInSnapshot` gate keeps a snapshot generated *before* the
+ * invite existed from clearing a freshly created card.
+ */
+export function isHomeFleetInviteStale(tracking: HomeFleetInviteTracking, homeFleet: HomeFleetSnapshot): boolean {
+  if (homeFleet.workers.length > tracking.workerCountAtCreation) return true;
+  return tracking.inviteSeenInSnapshot && !homeFleet.activeInviteExpiresAt;
+}

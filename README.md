@@ -278,6 +278,11 @@ Ollama installation and one fixed peer-review role.
    npx --yes omnibus-bridge@<version> worker --join <payload> --pull-models
    ```
 
+   Add `--label "Kitchen MacBook"` to name the laptop; otherwise it receives
+   a distinct callsign such as `macOS Peer · Cedar` so two identical MacBooks
+   never look alike in Fleet Setup. Re-running with a new `--label` renames
+   the laptop over its next signed heartbeat — no re-pairing needed.
+
    The generated command pins the installed package version. Its `npx --yes`
    accepts only the temporary npm package download; Omnibus still asks at the
    worker terminal before the potentially multi-gigabyte model download.
@@ -375,6 +380,13 @@ never in a cloud account — made of five cooperating parts:
   idea-text-only exactly as before. A worker holding a bundle keeps its small
   review model resident (`HOME_FLEET_WORKER_KEEP_ALIVE`, default 10m) instead
   of unloading after every review.
+
+The whole layer sizes itself to the laptop it lands on: capacity knobs the
+owner did not set explicitly (model context window, graph node/fact limits,
+retrieval depth, ambient poll cadence, worker model residency) resolve from
+physical memory into a compact / balanced / power / studio tier — the same
+vocabulary as the phone's fleet profiles. `omnibus-bridge doctor` prints the
+chosen tier, and any explicit environment variable overrides it.
 
 Everything lives under `.omnibus/state/brain/` with owner-only permissions,
 inside the directory the workspace scanner already refuses to read back into

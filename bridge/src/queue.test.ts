@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -92,6 +92,64 @@ test("queue capacity only counts commands that can still run", async () => {
     await queue.fail(claimed!.id, "terminal failure");
     const afterFailure = await queue.enqueue(command("55555555-5555-4555-8555-555555555555"));
     assert.equal(afterFailure.accepted, true);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a corrupt queue file is quarantined and processing continues empty", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "omnibus-queue-test-"));
+  const options = { maxPending: 2, maxAttempts: 1, retryBaseMs: 250 };
+  try {
+    await writeFile(path.join(stateDir, "command-queue.json"), "{ this is not json", "utf8");
+    const queue = new DurableCommandQueue(stateDir, options);
+    const snapshot = await queue.snapshot();
+    assert.equal(snapshot.jobs.length, 0);
+
+    const enqueued = await queue.enqueue(command("77777777-7777-4777-8777-777777777777"));
+    assert.equal(enqueued.accepted, true);
+
+    const entries = await readdir(stateDir);
+    assert.ok(
+      entries.some(name => name.startsWith("command-queue.json.corrupt-")),
+      `expected a quarantined corrupt file, saw: ${entries.join(", ")}`,
+    );
+    // A fresh instance reads the rewritten durable file rather than re-failing.
+    const reloaded = await new DurableCommandQueue(stateDir, options).snapshot();
+    assert.equal(reloaded.jobs.length, 1);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("resubmitting a failed command's correlationId replaces the failed record; live ids stay duplicates", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "omnibus-queue-test-"));
+  const options = { maxPending: 2, maxAttempts: 1, retryBaseMs: 250 };
+  const id = "88888888-8888-4888-8888-888888888888";
+  try {
+    const queue = new DurableCommandQueue(stateDir, options);
+    assert.equal((await queue.enqueue(command(id))).accepted, true);
+
+    // A collision with live (queued) work is still refused as a duplicate.
+    const duplicateWhileQueued = await queue.enqueue(command(id));
+    assert.deepEqual(duplicateWhileQueued, { accepted: false, reason: "DUPLICATE", pending: 1 });
+
+    const claimed = await queue.claimNext();
+    const terminal = await queue.fail(claimed!.id, "terminal failure");
+    assert.equal(terminal.retry, false);
+
+    // A collision with the retained failed record means the owner is retrying
+    // after the failure, so the record is replaced with fresh attempts.
+    const resubmitted = await queue.enqueue(command(id));
+    assert.equal(resubmitted.accepted, true);
+    if (!resubmitted.accepted) return assert.fail("resubmission after a terminal failure should be accepted");
+    assert.equal(resubmitted.job.status, "queued");
+    assert.equal(resubmitted.job.attempts, 0);
+    assert.equal(resubmitted.job.lastError, undefined);
+
+    const snapshot = await queue.snapshot();
+    assert.equal(snapshot.jobs.length, 1);
+    assert.equal(snapshot.jobs[0]?.status, "queued");
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

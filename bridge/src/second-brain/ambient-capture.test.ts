@@ -372,3 +372,106 @@ test("secondBrainEnabled=false disables every watcher and makes start a no-op", 
     }
   });
 });
+
+function makeClock(startIso: string): { now: () => Date; advance: (ms: number) => void } {
+  let atMs = new Date(startIso).getTime();
+  return {
+    now: () => new Date(atMs),
+    advance: (ms: number) => { atMs += ms; },
+  };
+}
+
+/** LLM stub that counts calls and always returns one well-formed triple. */
+function countingTripleLlm(): { llm: LocalLlm; count: () => number } {
+  let calls = 0;
+  return {
+    llm: {
+      generateJson: async () => {
+        calls += 1;
+        return { triples: [{ subject: "omnibus", predicate: "targets", object: "iphone" }] };
+      },
+      available: async () => true,
+    },
+    count: () => calls,
+  };
+}
+
+test("watcher LLM distillation is rate-limited to one call per 10 minutes", async () => {
+  await withTempDirs(async ({ brainDir, auditDir }) => {
+    const graph = new StubGraph();
+    const clock = makeClock("2026-07-19T09:00:00.000Z");
+    const counting = countingTripleLlm();
+    const gitOptions = { insideWorkTree: true, porcelain: " M src/a.ts\n" };
+    const service = new AmbientCaptureService({
+      workspacePath: "/workspace",
+      brainDir,
+      graph,
+      llm: counting.llm,
+      audit: new AuditTrail(auditDir),
+      config: baseConfig,
+      now: clock.now,
+      runCommand: gitFake(gitOptions),
+    });
+    try {
+      await service.start();
+      assert.equal(counting.count(), 1, "first poll may use the LLM");
+      assert.equal(graph.assertedFacts[0]?.subject.name, "omnibus");
+      await service.stop();
+
+      // A fresh snapshot one minute later must NOT trigger another 7B
+      // inference; the deterministic heuristics carry the capture instead.
+      gitOptions.porcelain = " M src/b.ts\n";
+      clock.advance(60_000);
+      await service.start();
+      assert.equal(counting.count(), 1, "second poll inside the window must skip the LLM");
+      assert.ok(
+        graph.assertedFacts.some(fact => fact.subject.name === "src/b.ts" && fact.predicate === "changed"),
+        "heuristics must still capture between LLM windows",
+      );
+      await service.stop();
+
+      // Once the window elapses the next changed snapshot may distill again.
+      gitOptions.porcelain = " M src/c.ts\n";
+      clock.advance(10 * 60_000);
+      await service.start();
+      assert.equal(counting.count(), 2, "the window elapsing re-enables one LLM call");
+    } finally {
+      await service.stop();
+    }
+  });
+});
+
+test("shouldDistill=false skips every LLM call and falls back to heuristics", async () => {
+  await withTempDirs(async ({ brainDir, auditDir }) => {
+    const graph = new StubGraph();
+    const counting = countingTripleLlm();
+    const service = new AmbientCaptureService({
+      workspacePath: "/workspace",
+      brainDir,
+      graph,
+      llm: counting.llm,
+      discussionLlm: counting.llm,
+      shouldDistill: () => false,
+      audit: new AuditTrail(auditDir),
+      config: baseConfig,
+      now: () => new Date("2026-07-19T12:00:00.000Z"),
+      runCommand: gitFake({ insideWorkTree: true, porcelain: " M src/x.ts\n" }),
+    });
+    try {
+      await service.start();
+      assert.equal(counting.count(), 0, "capacity gate must skip watcher LLM cost");
+      assert.ok(
+        graph.assertedFacts.some(fact => fact.subject.name === "src/x.ts"),
+        "heuristic capture must continue at the cap",
+      );
+
+      await service.captureDiscussion({ correlationId: "corr-cap", role: "idea", text: "an idea captured at the node cap" });
+      assert.equal(counting.count(), 0, "discussion distillation must also skip the LLM");
+      const [contribution] = graph.merged[0]!;
+      assert.ok(contribution);
+      assert.equal(contribution.triples, undefined, "heuristic contribution carries plain text");
+    } finally {
+      await service.stop();
+    }
+  });
+});

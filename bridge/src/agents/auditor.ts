@@ -12,8 +12,20 @@ type OllamaPacket = {
   eval_count?: number;
 };
 
+/**
+ * The audit pass is the longest silent phase on CPU-bound hardware, so the
+ * phone gets a heartbeat while stream chunks arrive — but at most this often,
+ * to stay compact on a mobile connection.
+ */
+const AUDIT_HEARTBEAT_MS = 2_500;
+
 export class LocalAuditor {
-  public constructor(private readonly config: AppConfig, private readonly audit: AuditTrail) {}
+  public constructor(
+    private readonly config: AppConfig,
+    private readonly audit: AuditTrail,
+    /** Injectable only to make heartbeat pacing deterministic in tests. */
+    private readonly clock: () => number = Date.now,
+  ) {}
 
   public async enrich(
     correlationId: string,
@@ -21,6 +33,7 @@ export class LocalAuditor {
     priorMemory?: string,
     webResearch?: WebResearchResult,
     knowledgeContext?: string,
+    onProgress?: (text: string) => void,
   ): Promise<AuditResult> {
     // Context retrieval is intentionally local-only and bounded. An owner can
     // point Ollama at another host or select the cloud Developer, but in either
@@ -124,6 +137,7 @@ export class LocalAuditor {
     let buffer = "";
     let rawOutput = "";
     let finalPacket: OllamaPacket = {};
+    let nextHeartbeatAt = this.clock() + AUDIT_HEARTBEAT_MS;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -136,6 +150,10 @@ export class LocalAuditor {
         if (packet.response) {
           rawOutput += packet.response;
           await this.audit.append({ at: new Date().toISOString(), correlationId, agent: "auditor", event: "ollama_stream_text", data: { text: packet.response } });
+          if (onProgress && this.clock() >= nextHeartbeatAt) {
+            onProgress("Auditor is still reviewing locally…");
+            nextHeartbeatAt = this.clock() + AUDIT_HEARTBEAT_MS;
+          }
         }
         if (packet.done) finalPacket = packet;
       }

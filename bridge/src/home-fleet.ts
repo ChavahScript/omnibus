@@ -148,6 +148,8 @@ export type HomeFleetHeartbeatRequest = {
   endpoint: HomeFleetEndpoint;
   timestamp: string;
   nonce: string;
+  /** Present only while the worker is advertising an owner-chosen rename. */
+  label?: string;
   /**
    * Optional warm-cache advertisement (each entry a sha256 hex digest of a
    * context bundle this worker holds). A v0.2.0 worker that never sends the
@@ -382,6 +384,8 @@ export type HomeFleetWorkerOptions = HomeFleetListenOptions & {
    * module ever choosing a secret-bearing filesystem path.
    */
   onCoordinatorChanged?: () => void;
+  /** Set when the owner renamed this worker; the heartbeat carries it once. */
+  advertiseLabelUpdate?: boolean;
   /**
    * Optional local prompt-prefix warmer invoked after a bundle is stored and
    * verified. The embedding CLI wires it to a bounded local Ollama generate;
@@ -712,6 +716,17 @@ export class HomeFleetCoordinator {
     if (sanitizedPrefixes) record.snapshot.cachedPrefixes = sanitizedPrefixes;
     else delete record.snapshot.cachedPrefixes;
 
+    // An advertised rename becomes the durable display name. Sanitized only
+    // after MAC verification; an empty result keeps the existing name so a
+    // hostile rename cannot blank a Fleet Setup row.
+    if (request.label !== undefined) {
+      const renamed = request.label.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+      if (renamed && renamed !== record.snapshot.label) {
+        record.snapshot.label = renamed;
+        this.notifyWorkerChanged();
+      }
+    }
+
     const endpointChanged = !sameEndpoint(record.snapshot.endpoint, request.endpoint);
     if (endpointChanged) {
       // An IP/port change invalidates previous reverse health evidence. Keep
@@ -1036,10 +1051,18 @@ export class HomeFleetWorker {
   private endpoint: HomeFleetEndpoint | undefined;
   private coordinator: WorkerCoordinatorSession | undefined;
   private reviewInFlight = false;
+  /**
+   * True while an owner rename still needs to reach the coordinator. The
+   * label rides the signed heartbeat until one acknowledgement proves it
+   * landed; against a coordinator too old to know the field, the next beat
+   * falls back to the legacy payload so a rename can never strand a worker.
+   */
+  private advertiseLabelUpdate = false;
 
   public constructor(options: HomeFleetWorkerOptions) {
     this.workerId = validateIdentifier(options.workerId ?? randomUUID(), "workerId");
     this.label = validateLabel(options.label);
+    this.advertiseLabelUpdate = options.advertiseLabelUpdate ?? false;
     this.configuredHost = assertPrivateBindHost(options.host ?? "127.0.0.1");
     this.configuredPort = assertListenPort(options.port ?? 0);
     this.reviewHandler = options.review;
@@ -1169,6 +1192,11 @@ export class HomeFleetWorker {
       timestamp,
       nonce,
       ...(cachedPrefixes.length ? { cachedPrefixes } : {}),
+      // A rename is advertised only until one coordinator acknowledges it.
+      // Like cachedPrefixes, the optional field enters the HMAC only when
+      // present, so an unrenamed worker signs bytes identical to older
+      // builds and interop is preserved.
+      ...(this.advertiseLabelUpdate ? { label: this.label } : {}),
       proof: "",
     };
     request.proof = signMac(session.secret, heartbeatRequestPayload(request));
@@ -1183,6 +1211,14 @@ export class HomeFleetWorker {
       const responseText = await boundedResponseText(response);
       if (!response.ok) {
         const remoteError = decodeRemoteError(response.status, responseText);
+        if (remoteError.code === "AUTHENTICATION_FAILED" && this.advertiseLabelUpdate) {
+          // A coordinator that predates rename advertisements verifies the
+          // MAC over a payload without the label and rejects this beat. Keep
+          // the local name, stop advertising, and retry legacy-shaped so the
+          // pairing itself is never sacrificed to a cosmetic rename.
+          this.advertiseLabelUpdate = false;
+          return this.heartbeat();
+        }
         return { status: remoteError.code === "AUTHENTICATION_FAILED" ? "unauthorized" : "unreachable" };
       }
       const acknowledged = parseHeartbeatResponse(parseJson(responseText));
@@ -1195,6 +1231,9 @@ export class HomeFleetWorker {
       ) {
         return { status: "unauthorized" };
       }
+      // The acknowledgement proves a coordinator verified the full signed
+      // payload — including the advertised rename. Stop repeating it.
+      this.advertiseLabelUpdate = false;
       if (!sameEndpoint(session.endpoint, acknowledged.coordinator)) {
         // Only a valid acknowledgement under the retained session may move a
         // coordinator target. This does not accept hostnames or public routes.
@@ -1720,6 +1759,12 @@ function parseHeartbeatRequest(value: unknown): HomeFleetHeartbeatRequest {
   // otherwise silently dropping one entry here would change the signed
   // payload and fail an honest worker's whole heartbeat.
   const cachedPrefixes = rawCachedPrefixes(object.cachedPrefixes);
+  // Like cachedPrefixes, an advertised rename is carried RAW (bounded only
+  // against abuse) so the MAC verifies what the worker signed; display
+  // sanitation happens after verification in acceptHeartbeat.
+  const label = typeof object.label === "string" && object.label.length > 0 && object.label.length <= 200
+    ? object.label
+    : undefined;
   return {
     protocolVersion: HOME_FLEET_PROTOCOL_VERSION,
     type: "home_fleet.heartbeat",
@@ -1727,6 +1772,7 @@ function parseHeartbeatRequest(value: unknown): HomeFleetHeartbeatRequest {
     endpoint: parseEndpoint(object.endpoint),
     timestamp: validateIsoTimestamp(object.timestamp, "timestamp"),
     nonce: validateIdentifier(object.nonce, "nonce"),
+    ...(label !== undefined ? { label } : {}),
     ...(cachedPrefixes ? { cachedPrefixes } : {}),
     proof: validateProof(object.proof),
   };
@@ -2011,6 +2057,7 @@ function heartbeatRequestPayload(request: Omit<HomeFleetHeartbeatRequest, "proof
     request.timestamp,
     request.nonce,
     ...(request.cachedPrefixes?.length ? [`cached:${request.cachedPrefixes.join(",")}`] : []),
+    ...(request.label !== undefined ? [`label:${request.label}`] : []),
   ].join("\n");
 }
 

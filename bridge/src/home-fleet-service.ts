@@ -50,7 +50,12 @@ const HEALTH_SWEEP_INTERVAL_MS = 20_000;
  * never grants a different capability: all workers still receive only the
  * owner's original idea and the fixed review contract below.
  */
-const PEER_REVIEW_LENSES = [
+export type PeerReviewLens = {
+  readonly label: string;
+  readonly instruction: string;
+};
+
+const PEER_REVIEW_LENSES: readonly PeerReviewLens[] = [
   {
     label: "Product lens",
     instruction: "Focus on the intended user, the sharpest value proposition, assumptions that need validation, and the smallest credible first experience.",
@@ -169,7 +174,7 @@ export class HomeFleetService implements HomeFleetReviewer {
 
   /** Refreshes signed worker health before producing a secret-free phone view. */
   public async snapshot(): Promise<HomeFleetSnapshot> {
-    this.clearExpiredInvite();
+    this.syncInviteState();
     await this.ensureCoordinatorListener();
     if (!this.available) return {
       available: false,
@@ -178,7 +183,7 @@ export class HomeFleetService implements HomeFleetReviewer {
     };
 
     await this.refreshWorkerHealth();
-    const workers = this.coordinator.snapshot().workers.map(worker => this.toPhoneWorker(worker));
+    const workers = disambiguateWorkerLabels(this.coordinator.snapshot().workers.map(worker => this.toPhoneWorker(worker)));
     const known = new Set(workers.map(worker => worker.id));
     let changed = false;
     for (const approvedId of this.approvedWorkerIds) {
@@ -200,9 +205,13 @@ export class HomeFleetService implements HomeFleetReviewer {
   public async issueInvite(correlationId: string): Promise<HomeFleetInvite> {
     await this.ensureCoordinatorListener();
     this.requireAvailable();
-    this.clearExpiredInvite();
+    this.syncInviteState();
     const current = this.coordinator.snapshot();
-    if (current.pendingJoinTokens > 0 || this.activeInviteExpiresAt) {
+    // The coordinator's pending-token count is the single authority here:
+    // registration consumes the one-time token immediately, so a fleet with
+    // zero pending tokens can always invite the next laptop right away even
+    // though the previous invitation's display expiry has not passed yet.
+    if (current.pendingJoinTokens > 0) {
       throw new HomeFleetServiceError("HOME_FLEET_INVITE_ACTIVE", "A Home Fleet invitation is already active. Use it or wait for it to expire before creating another.");
     }
     // At capacity this is intentionally still a valid *repair* invitation:
@@ -305,16 +314,21 @@ export class HomeFleetService implements HomeFleetReviewer {
 
     if (bundle) await this.distributeContextBundle(bundle, eligible.map(worker => worker.id), warm);
 
-    const assignments = new Map(eligible.map((worker, index) => [
+    // Lens identity is deliberately decoupled from dispatch order: dispatch
+    // stays warm-first, while each laptop's lens comes from a stable id
+    // ranking so the same machine keeps the same review perspective across
+    // runs even as cache warmth reshuffles who is contacted first.
+    const lensById = assignPeerReviewLenses(eligible.map(worker => worker.id));
+    const assignments = new Map(eligible.map(worker => [
       worker.id,
-      { label: worker.label, lens: PEER_REVIEW_LENSES[index % PEER_REVIEW_LENSES.length]! },
+      { label: worker.label, lens: lensById.get(worker.id) ?? PEER_REVIEW_LENSES[0]! },
     ]));
     // One request per worker preserves a differentiated lens while the outer
     // Promise fanout still uses the otherwise-idle laptops in parallel. The
     // eligibility slice above keeps this intentionally bounded at three.
-    const outcomes = (await Promise.all(eligible.map((worker, index) => this.coordinator.reviewWorkers(
+    const outcomes = (await Promise.all(eligible.map(worker => this.coordinator.reviewWorkers(
       [worker.id],
-      peerReviewPrompt(request.directive, PEER_REVIEW_LENSES[index % PEER_REVIEW_LENSES.length]!),
+      peerReviewPrompt(request.directive, lensById.get(worker.id) ?? PEER_REVIEW_LENSES[0]!),
       { concurrency: 1, ...(bundle && warm.has(worker.id) ? { prefixDigest: bundle.digest } : {}) },
     )))).flat();
     const reviews: HomeFleetPeerReview[] = outcomes.flatMap(outcome => {
@@ -420,7 +434,7 @@ export class HomeFleetService implements HomeFleetReviewer {
     });
   }
 
-  private toPhoneWorker(worker: HomeFleetWorkerSnapshot): HomeFleetWorker {
+  private toPhoneWorker(worker: HomeFleetWorkerSnapshot): DisambiguationWorker {
     // A worker reports only its own fixed local review model after the CLI
     // verifies it. Do not require it to equal the coordinator's default: an
     // owner may deliberately configure a different local model on a stronger
@@ -433,6 +447,9 @@ export class HomeFleetService implements HomeFleetReviewer {
       modelReady,
       approved: this.approvedWorkerIds.has(worker.workerId),
       ...(worker.lastCheckedAt ? { lastSeenAt: worker.lastCheckedAt } : {}),
+      // Pairing time feeds duplicate-label wording only; the disambiguation
+      // helper strips it before the snapshot crosses to the phone.
+      registeredAt: worker.registeredAt,
     };
   }
 
@@ -444,9 +461,16 @@ export class HomeFleetService implements HomeFleetReviewer {
     );
   }
 
-  private clearExpiredInvite(): void {
+  /**
+   * `activeInviteExpiresAt` is display-only state; the coordinator's pending
+   * one-time-token count is what actually admits a worker. The coordinator
+   * purges expired tokens and registration consumes them immediately, so a
+   * zero pending count — for either reason — means no invitation is open and
+   * the stale display expiry must not keep blocking the next invite.
+   */
+  private syncInviteState(): void {
     if (!this.activeInviteExpiresAt) return;
-    if (new Date(this.activeInviteExpiresAt).getTime() <= Date.now()) this.activeInviteExpiresAt = undefined;
+    if (this.coordinator.snapshot().pendingJoinTokens === 0) this.activeInviteExpiresAt = undefined;
   }
 
   private startResult(): HomeFleetStartResult {
@@ -579,6 +603,71 @@ export class HomeFleetService implements HomeFleetReviewer {
       if (!committed) await rm(temporary, { force: true }).catch(() => undefined);
     }
   }
+}
+
+/**
+ * Assigns each selected reviewer its lens from a ranking of the worker ids
+ * themselves, never from dispatch position. Warm-first cache routing may
+ * legitimately reorder who is contacted first, but an owner watching three
+ * spare laptops should see each machine keep the same review perspective
+ * from run to run for the same selected set.
+ */
+export function assignPeerReviewLenses(workerIds: readonly string[]): Map<string, PeerReviewLens> {
+  const ranked = [...new Set(workerIds)].sort();
+  return new Map(ranked.map((workerId, rank) => [workerId, PEER_REVIEW_LENSES[rank % PEER_REVIEW_LENSES.length]!]));
+}
+
+/** Snapshot-only input: `registeredAt` improves duplicate wording and is never sent to the phone. */
+export type DisambiguationWorker = HomeFleetWorker & { registeredAt?: string };
+
+/**
+ * Two spare MacBooks paired a minute apart can legitimately carry the same
+ * display name. The owner still has to know which row to approve or remove,
+ * so duplicates get a stable suffix — display-only disambiguation, never a
+ * change to the worker's stored label. When every duplicate carries its
+ * pairing time the suffix says which laptop paired first ("(paired 1st)");
+ * otherwise a short worker-id fragment remains the deterministic fallback.
+ */
+export function disambiguateWorkerLabels(workers: DisambiguationWorker[]): HomeFleetWorker[] {
+  const groups = new Map<string, DisambiguationWorker[]>();
+  for (const worker of workers) {
+    const group = groups.get(worker.label) ?? [];
+    group.push(worker);
+    groups.set(worker.label, group);
+  }
+  const suffixById = new Map<string, string>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    if (group.every(worker => isParseableTimestamp(worker.registeredAt))) {
+      // Pairing order is stable for the life of the pairing; ties (identical
+      // timestamps) fall back to id order so the mapping stays deterministic.
+      const ordered = [...group].sort((left, right) =>
+        new Date(left.registeredAt!).getTime() - new Date(right.registeredAt!).getTime() || left.id.localeCompare(right.id));
+      ordered.forEach((worker, index) => suffixById.set(worker.id, ` (paired ${ordinal(index + 1)})`));
+    } else {
+      for (const worker of group) suffixById.set(worker.id, ` · ${worker.id.slice(0, 4)}`);
+    }
+  }
+  return workers.map(worker => {
+    const { registeredAt: _registeredAt, ...phoneWorker } = worker;
+    const suffix = suffixById.get(worker.id);
+    if (!suffix) return phoneWorker;
+    // The wire schema bounds labels to 80 chars; trim the base so the suffix
+    // always fits rather than producing an invalid snapshot.
+    return { ...phoneWorker, label: `${worker.label.slice(0, 80 - suffix.length)}${suffix}` };
+  });
+}
+
+function isParseableTimestamp(value: string | undefined): value is string {
+  return Boolean(value) && Number.isFinite(new Date(value!).getTime());
+}
+
+/** Bounded by the 8-worker fleet limit; English ordinals up to that bound. */
+function ordinal(position: number): string {
+  if (position === 1) return "1st";
+  if (position === 2) return "2nd";
+  if (position === 3) return "3rd";
+  return `${position}th`;
 }
 
 /**

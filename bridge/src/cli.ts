@@ -10,7 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { loadConfig, type AppConfig } from "./config.js";
+import { DEFAULT_LOCAL_MODEL, loadConfig, type AppConfig } from "./config.js";
 import { startBridge } from "./index.js";
 import { AuditTrail } from "./audit.js";
 import { BridgeSettingsStore } from "./bridge-settings.js";
@@ -26,6 +26,9 @@ import {
   pullLocalModels,
   requiredLocalModels,
   type LocalModelRequirement,
+  type OllamaExecutable,
+  type OllamaInspection,
+  type OllamaRuntimeInstallPlan,
   type PullProgress,
 } from "./local-intelligence.js";
 import { HomeFleetWorker, parseSerializedJoinInvitation, type HomeFleetEndpoint, type HomeFleetWorkerPrivateState } from "./home-fleet.js";
@@ -49,6 +52,8 @@ export type CliOptions = {
   startOllama: boolean;
   /** Quote-free base64url invitation supplied only to the worker subcommand. */
   joinPayload?: string;
+  /** Owner-chosen worker display name; only valid with the worker command. */
+  workerLabel?: string;
   /** Pre-commit gate action; only valid with the `hook` command. */
   hookAction?: HookAction;
   /** `hook check --fix`: apply safe auto-corrections to the working tree. */
@@ -117,6 +122,15 @@ export function parseCliArguments(argv: string[]): CliOptions {
         index += 1;
         break;
       }
+      case "--label": {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("-")) throw new CliError('--label requires a name, e.g. --label "Kitchen MacBook".', 2);
+        const label = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (!label) throw new CliError("--label needs at least one printable character.", 2);
+        options.workerLabel = label;
+        index += 1;
+        break;
+      }
       case "--help":
       case "-h":
         options.command = "help";
@@ -153,6 +167,9 @@ export function parseCliArguments(argv: string[]): CliOptions {
   if (options.joinPayload && options.command !== "worker") {
     throw new CliError("--join is only valid with `omnibus-bridge worker`.", 2);
   }
+  if (options.workerLabel && options.command !== "worker") {
+    throw new CliError("--label is only valid with `omnibus-bridge worker`; it names this laptop in Fleet Setup.", 2);
+  }
   if (options.command === "hook" && (options.installRuntime || options.pullModels || options.yes)) {
     throw new CliError("hook actions never download software or models and do not accept setup options.", 2);
   }
@@ -172,6 +189,7 @@ export async function runCli(argv: string[]): Promise<number> {
     return 0;
   }
   let config: AppConfig;
+  let fleetProfileStored = false;
   try {
     config = loadConfig();
     // A fleet chosen from a QR-paired phone is owner-local state, not a value
@@ -180,7 +198,10 @@ export async function runCli(argv: string[]): Promise<number> {
     // A spare-laptop worker has one fixed, owner-local peer-review model. It
     // must not inherit a coordinator's Auditor/Developer profile merely because
     // both commands happened to run from the same project directory.
-    if (options.command !== "worker") await new BridgeSettingsStore(config.statePath).applyTo(config);
+    if (options.command !== "worker") {
+      const summary = await new BridgeSettingsStore(config.statePath).applyTo(config);
+      fleetProfileStored = Boolean(summary.fleetProfileId);
+    }
   } catch (error) {
     // The pre-commit gate's fail-open invariant covers infrastructure, not
     // just a missing binary: a broken .env must never hold a commit hostage,
@@ -193,11 +214,11 @@ export async function runCli(argv: string[]): Promise<number> {
   }
   switch (options.command) {
     case "setup":
-      return runSetup(config, options);
+      return runSetup(config, options, fleetProfileStored);
     case "doctor":
       return runDoctor(config);
     case "start":
-      return runStart(config, options);
+      return runStart(config, options, fleetProfileStored);
     case "worker":
       return runWorker(config, options);
     case "hook":
@@ -312,15 +333,16 @@ async function withTemporaryKeepAwake<T>(config: AppConfig, operation: () => Pro
   }
 }
 
-async function runSetup(config: AppConfig, options: CliOptions): Promise<number> {
-  return withTemporaryKeepAwake(config, () => runSetupWhileAwake(config, options));
+async function runSetup(config: AppConfig, options: CliOptions, fleetProfileStored: boolean): Promise<number> {
+  return withTemporaryKeepAwake(config, () => runSetupWhileAwake(config, options, fleetProfileStored));
 }
 
-async function runSetupWhileAwake(config: AppConfig, options: CliOptions): Promise<number> {
+async function runSetupWhileAwake(config: AppConfig, options: CliOptions, fleetProfileStored: boolean): Promise<number> {
   const infrastructure = await initializeLocalInfrastructure(config);
   console.log(infrastructure.firstRun
     ? `Created local Omnibus storage at ${path.dirname(infrastructure.auditPath)}.`
     : `Using local Omnibus storage at ${path.dirname(infrastructure.auditPath)}.`);
+  warnAboutSmallLaptopDefaults(config, fleetProfileStored);
 
   const readiness = await prepareOllama(config, options);
   if (!readiness.reachable) {
@@ -346,11 +368,12 @@ async function runSetupWhileAwake(config: AppConfig, options: CliOptions): Promi
   return 0;
 }
 
-async function runStart(config: AppConfig, options: CliOptions): Promise<number> {
+async function runStart(config: AppConfig, options: CliOptions, fleetProfileStored: boolean): Promise<number> {
   // Keep the laptop awake during runtime startup/model pull. `startBridge`
   // creates its own long-lived guard before this temporary guard releases.
   return withTemporaryKeepAwake(config, async () => {
   await initializeLocalInfrastructure(config);
+  warnAboutSmallLaptopDefaults(config, fleetProfileStored);
   const readiness = await prepareOllama(config, options);
   if (!readiness.reachable) throw new CliError(readiness.error ?? "Ollama is not reachable.");
   const missing = missingLocalModels(requiredLocalModels(config), readiness.models);
@@ -374,6 +397,44 @@ async function runStart(config: AppConfig, options: CliOptions): Promise<number>
 }
 
 /**
+ * A fresh install on a small laptop quietly inherits a 7B default team that
+ * wants roughly 5-7 GB of memory while resident. The bridge never swaps a
+ * model on its own — that would be a silent configuration change — but it
+ * must say so loudly BEFORE any pull confirmation, when changing course is
+ * still one decision instead of a re-download.
+ */
+export function smallLaptopCapacityWarning(options: {
+  ollamaModel: string;
+  ollamaDeveloperModel: string;
+  fleetProfileStored: boolean;
+  totalMemoryBytes: number;
+}): string | undefined {
+  const GIB = 1024 ** 3;
+  if (options.totalMemoryBytes >= 12 * GIB) return undefined;
+  // A stored fleet profile is an explicit hardware-aware choice already made.
+  if (options.fleetProfileStored) return undefined;
+  if (options.ollamaModel !== DEFAULT_LOCAL_MODEL && options.ollamaDeveloperModel !== DEFAULT_LOCAL_MODEL) return undefined;
+  const gb = Math.round(options.totalMemoryBytes / GIB);
+  return [
+    "================================ CAPACITY WARNING ================================",
+    `This laptop has ${gb} GB of memory; the default 7B model team wants ~5-7 GB while resident.`,
+    "Pair the phone and pick the Compact fleet in Fleet Setup, or set OLLAMA_MODEL to a smaller tag.",
+    "No model was swapped automatically; the configured team is unchanged.",
+    "==================================================================================",
+  ].join("\n");
+}
+
+function warnAboutSmallLaptopDefaults(config: AppConfig, fleetProfileStored: boolean): void {
+  const warning = smallLaptopCapacityWarning({
+    ollamaModel: config.ollamaModel,
+    ollamaDeveloperModel: config.ollamaDeveloperModel,
+    fleetProfileStored,
+    totalMemoryBytes: os.totalmem(),
+  });
+  if (warning) console.warn(warning);
+}
+
+/**
  * Runs one spare-laptop peer-review service. Unlike `start`, this command
  * never opens localtunnel, QR pairing, a workspace agent, or host execution.
  * Its only network listener is the fixed authenticated Home Fleet protocol on
@@ -381,24 +442,45 @@ async function runStart(config: AppConfig, options: CliOptions): Promise<number>
  * review text for an explicitly joined coordinator.
  */
 async function runWorker(config: AppConfig, options: CliOptions): Promise<number> {
-  // A worker can pull a model, await a fresh pairing, and serve long local
-  // reviews. Hold one user-scoped assertion through all of those phases.
-  return withTemporaryKeepAwake(config, () => runWorkerWhileAwake(config, options));
-}
-
-async function runWorkerWhileAwake(config: AppConfig, options: CliOptions): Promise<number> {
-  await initializeLocalInfrastructure(config);
+  // Precondition validation happens BEFORE the keep-awake assertion engages:
+  // a user who forgot --join must see the actionable error as the first
+  // output, not a power-status banner from machinery that never needed to run.
   const invitation = options.joinPayload ? parseWorkerInvitation(options.joinPayload) : undefined;
   const saved = await readWorkerRuntimeState(config.statePath);
   if (!invitation && !saved) {
     throw new CliError("`omnibus-bridge worker` needs `--join <invitation>` the first time. Create the one-time command from Fleet Setup on your paired phone.", 2);
   }
+  if (!isLoopbackOllamaBaseUrl(config.ollamaBaseUrl)) {
+    throw new CliError("Home Fleet workers require a loopback OLLAMA_BASE_URL. They never send peer-review prompts to a remote Ollama server.");
+  }
+  // A worker can pull a model, await a fresh pairing, and serve long local
+  // reviews. Hold one user-scoped assertion through all of those phases.
+  return withTemporaryKeepAwake(config, () => runWorkerWhileAwake(config, options, invitation, saved));
+}
+
+async function runWorkerWhileAwake(
+  config: AppConfig,
+  options: CliOptions,
+  invitation: ReturnType<typeof parseWorkerInvitation> | undefined,
+  saved: WorkerRuntimeState | undefined,
+): Promise<number> {
+  await initializeLocalInfrastructure(config);
+  // Same-workspace co-residence: one Ollama on one small machine must not
+  // hold a coordinator's team AND a resident worker model at once.
+  const coordinatorCoResident = await pathExists(path.join(config.statePath, "home-fleet-coordinator.json"));
+  const residency = planWorkerResidency({ coordinatorCoResident, configuredKeepAlive: config.homeFleetWorkerKeepAlive });
+  if (residency.notice) console.warn(residency.notice);
 
   const initialBindHost = await resolveWorkerBindHost(config, invitation, saved?.bindHost);
   if (!initialBindHost) {
     throw new CliError("This laptop has no usable RFC1918 network address for Home Fleet. Join the same trusted private network as the coordinator, or set HOME_FLEET_BIND_HOST to this laptop's private IPv4 address.");
   }
-  const label = saved?.label ?? defaultWorkerLabel();
+  // Precedence: an explicit --label wins (and persists for later resumes),
+  // then the saved name from the last run, then a fresh distinct callsign.
+  const label = options.workerLabel ?? saved?.label ?? defaultWorkerLabel();
+  if (options.workerLabel && saved && saved.label !== options.workerLabel) {
+    console.log(`Worker renamed: "${saved.label}" → "${options.workerLabel}". Fleet Setup shows the new name after the next heartbeat.`);
+  }
   const workerConfig: AppConfig = {
     ...config,
     // A spare laptop is intentionally a small fixed peer-review role. It does
@@ -407,10 +489,8 @@ async function runWorkerWhileAwake(config: AppConfig, options: CliOptions): Prom
     ollamaDeveloperModel: config.homeFleetWorkerModel,
     ollamaNumCtx: config.homeFleetWorkerNumCtx,
     ollamaKeepAlive: "0",
+    homeFleetWorkerKeepAlive: residency.keepAlive,
   };
-  if (!isLoopbackOllamaBaseUrl(workerConfig.ollamaBaseUrl)) {
-    throw new CliError("Home Fleet workers require a loopback OLLAMA_BASE_URL. They never send peer-review prompts to a remote Ollama server.");
-  }
 
   const readiness = await prepareOllama(workerConfig, options);
   if (!readiness.reachable) throw new CliError(readiness.error ?? "The local Ollama runtime is not reachable.");
@@ -466,6 +546,8 @@ async function runWorkerWhileAwake(config: AppConfig, options: CliOptions): Prom
     host,
     port: saved?.port ?? workerConfig.homeFleetWorkerPort,
     installedModels: modelReady ? [workerConfig.homeFleetWorkerModel] : [],
+    // A rename travels on the signed heartbeat until one coordinator ack.
+    advertiseLabelUpdate: Boolean(options.workerLabel && saved && saved.label !== options.workerLabel),
     onCoordinatorChanged: persistWorkerPairing,
     ...(modelReady ? {
       review: async ({ text, prefixText }: { requestId: string; text: string; prefixText?: string }) => ({
@@ -473,9 +555,12 @@ async function runWorkerWhileAwake(config: AppConfig, options: CliOptions): Prom
       }),
       // Warming replays the owner-approved context bundle through the local
       // model with a one-token generation, so Ollama's prompt-prefix cache
-      // holds the pre-computed context in CPU memory for later reviews.
-      contextWarmer: async (bundle: { digest: string; text: string }) =>
-        warmHomeFleetContextPrefix(workerConfig, bundle.text),
+      // holds the pre-computed context in CPU memory for later reviews. With
+      // a co-resident coordinator the warmer stays declared but disabled, so
+      // the coordinator learns warming is unavailable instead of assuming it.
+      contextWarmer: residency.contextWarmingEnabled
+        ? async (bundle: { digest: string; text: string }) => warmHomeFleetContextPrefix(workerConfig, bundle.text)
+        : async () => false,
     } : {}),
   });
   const workerOptions = workerOptionsFor(currentBindHost);
@@ -500,6 +585,7 @@ async function runWorkerWhileAwake(config: AppConfig, options: CliOptions): Prom
     } else {
       console.log("Resumed the saved Home Fleet worker pairing.");
     }
+    for (const line of workerIdentityLines(label, !options.workerLabel && !saved)) console.log(line);
     await persistWorkerPairingNow();
     console.log(`Private worker listener: ${endpoint.url}`);
     console.log(modelReady
@@ -556,34 +642,90 @@ async function runDoctor(config: AppConfig): Promise<number> {
     inspectOllamaExecutable(),
     inspectStorage(config),
   ]);
-  const missing = missingLocalModels(requiredLocalModels(config), ollama.models);
+  const report = buildDoctorReport({
+    config,
+    ollama,
+    executable,
+    storage,
+    required: requiredLocalModels(config),
+    missing: missingLocalModels(requiredLocalModels(config), ollama.models),
+    runtimePlan: createOllamaRuntimeInstallPlan(),
+    totalMemoryBytes: os.totalmem(),
+  });
+  console.log("Omnibus bridge doctor\n");
+  for (const line of report.lines) console.log(line);
+  return report.unhealthy ? 1 : 0;
+}
+
+/** Every doctor row's text starts in the same column, whatever the tag says. */
+export function formatDoctorTag(kind: "ok" | "x" | "!" | "i"): string {
+  return `[${kind}]`.padEnd(4);
+}
+
+export type DoctorReportInput = {
+  config: Pick<
+    AppConfig,
+    "ollamaBaseUrl" | "auditPath" | "workspacePath" | "brainCapacityTier" | "ollamaNumCtx"
+    | "brainMaxNodes" | "brainMaxFacts" | "developerProvider" | "webResearchEnabled" | "webResearchProvider"
+  >;
+  ollama: OllamaInspection;
+  executable: OllamaExecutable;
+  storage: StorageInspection;
+  required: LocalModelRequirement[];
+  missing: LocalModelRequirement[];
+  runtimePlan: OllamaRuntimeInstallPlan;
+  totalMemoryBytes: number;
+};
+
+/**
+ * Pure diagnosis-to-report mapping, separated from I/O so its verdicts are
+ * testable. The one health rule worth stating: the bridge talks to Ollama's
+ * HTTP service, so a reachable service is healthy even when no `ollama`
+ * binary is on PATH — the executable only matters once auto-start is needed.
+ */
+export function buildDoctorReport(input: DoctorReportInput): { lines: string[]; unhealthy: boolean } {
+  const { config, ollama, executable, storage } = input;
+  const lines: string[] = [];
   let unhealthy = false;
 
-  console.log("Omnibus bridge doctor\n");
-  console.log(`${executable.available ? "[ok]" : "[x] "} Ollama executable${executable.version ? ` (${executable.version})` : ""}`);
-  if (!executable.available) {
-    unhealthy = true;
-    const runtimePlan = createOllamaRuntimeInstallPlan();
-    console.log(runtimePlan.supported
-      ? "     Explicit fix: omnibus-bridge setup --install-runtime --pull-models"
-      : `     ${runtimePlan.reason}`);
-  }
-  console.log(`${ollama.reachable ? "[ok]" : "[x] "} Ollama service at ${config.ollamaBaseUrl}${ollama.reachable ? "" : ` — ${ollama.error ?? "unreachable"}`}`);
-  if (!ollama.reachable) unhealthy = true;
-  if (ollama.reachable && missing.length === 0) {
-    console.log(`[ok] Local model team: ${requiredLocalModels(config).map(item => `${item.model} (${item.roles.join(" + ")})`).join(", ")}`);
+  if (executable.available) {
+    lines.push(`${formatDoctorTag("ok")} Ollama executable${executable.version ? ` (${executable.version})` : ""}`);
   } else if (ollama.reachable) {
-    console.log("[x]  Missing local models:");
-    for (const requirement of missing) console.log(`     ${requirement.model} — ${requirement.roles.join(" + ")}`);
-    console.log("     Explicit fix: omnibus-bridge setup --pull-models");
+    lines.push(`${formatDoctorTag("i")} Ollama executable not found — service reachable; a PATH binary is not required.`);
+  } else {
+    unhealthy = true;
+    lines.push(`${formatDoctorTag("x")} Ollama executable — not installed or not on PATH`);
+    lines.push(input.runtimePlan.supported
+      ? "     Explicit fix: omnibus-bridge setup --install-runtime --pull-models"
+      : `     ${input.runtimePlan.reason}`);
+  }
+  lines.push(`${formatDoctorTag(ollama.reachable ? "ok" : "x")} Ollama service at ${config.ollamaBaseUrl}${ollama.reachable ? "" : ` — ${ollama.error ?? "unreachable"}`}`);
+  if (!ollama.reachable) unhealthy = true;
+  if (ollama.reachable && input.missing.length === 0) {
+    lines.push(`${formatDoctorTag("ok")} Local model team: ${input.required.map(item => `${item.model} (${item.roles.join(" + ")})`).join(", ")}`);
+  } else if (ollama.reachable) {
+    lines.push(`${formatDoctorTag("x")} Missing local models:`);
+    for (const requirement of input.missing) lines.push(`     ${requirement.model} — ${requirement.roles.join(" + ")}`);
+    lines.push("     Explicit fix: omnibus-bridge setup --pull-models");
     unhealthy = true;
   }
-  console.log(`${storage.ready ? "[ok]" : "[!]"} Local storage at ${path.dirname(config.auditPath)}${storage.ready ? "" : " — will be created by setup or start"}`);
-  console.log(`[ok] Developer provider: ${config.developerProvider} (${config.developerProvider === "ollama" ? "local" : "optional cloud/host mode"})`);
-  console.log(config.webResearchEnabled
-    ? `[ok] Cited web research: ${config.webResearchProvider} (phone confirmation required per idea)`
-    : "[i]  Cited web research: disabled (local-only ideation remains available)");
-  return unhealthy ? 1 : 0;
+  const storageRoot = path.dirname(config.auditPath);
+  if (storage.ready) {
+    lines.push(`${formatDoctorTag("ok")} Local storage at ${storageRoot}`);
+  } else if (storage.blockedBy) {
+    // "Will be created" would be a false promise here: setup's mkdir is going
+    // to hit the same permission wall this probe just found.
+    unhealthy = true;
+    lines.push(`${formatDoctorTag("x")} Local storage at ${storageRoot} — cannot be created: ${storage.blockedBy} is not writable. Fix its permissions or set WORKSPACE_ROOT (currently ${config.workspacePath}) to a writable directory.`);
+  } else {
+    lines.push(`${formatDoctorTag("!")} Local storage at ${storageRoot} — will be created by setup or start`);
+  }
+  lines.push(`${formatDoctorTag("ok")} Adaptive sizing: ${config.brainCapacityTier} tier for this laptop's ${Math.round(input.totalMemoryBytes / 1024 ** 3)} GB — model context ${config.ollamaNumCtx.toLocaleString()}, knowledge graph up to ${config.brainMaxNodes.toLocaleString()} nodes / ${config.brainMaxFacts.toLocaleString()} facts (override with OLLAMA_NUM_CTX / OMNIBUS_BRAIN_* variables)`);
+  lines.push(`${formatDoctorTag("ok")} Developer provider: ${config.developerProvider} (${config.developerProvider === "ollama" ? "local" : "optional cloud/host mode"})`);
+  lines.push(config.webResearchEnabled
+    ? `${formatDoctorTag("ok")} Cited web research: ${config.webResearchProvider} (phone confirmation required per idea)`
+    : `${formatDoctorTag("i")} Cited web research: disabled (local-only ideation remains available)`);
+  return { lines, unhealthy };
 }
 
 async function prepareOllama(config: AppConfig, options: Pick<CliOptions, "installRuntime" | "yes" | "startOllama">): Promise<{ reachable: boolean; models: Awaited<ReturnType<typeof inspectOllama>>["models"]; error?: string }> {
@@ -815,12 +957,65 @@ async function writeWorkerRuntimeState(statePath: string, state: WorkerRuntimeSt
   }
 }
 
+/**
+ * Neutral one-word callsigns for spare laptops. Deliberately not hostnames,
+ * user names, or serials — nothing identifying crosses to the paired phone —
+ * but distinct enough that an owner with two MacBooks can tell which row in
+ * Fleet Setup is which. Chosen once at first pairing and persisted; the
+ * owner can always pick their own with `worker --label "Kitchen MacBook"`.
+ */
+const WORKER_CALLSIGNS = [
+  "Cedar", "Birch", "Maple", "Aspen", "Rowan", "Hazel", "Willow", "Alder",
+  "Granite", "Basalt", "Quartz", "Flint", "Slate", "Onyx", "Shale", "Jasper",
+  "Harbor", "Summit", "Meadow", "Tundra", "Canyon", "Prairie", "Glacier", "Mesa",
+] as const;
+
 function defaultWorkerLabel(): string {
   const platform = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform === "linux" ? "Linux" : "Local";
-  // A generic label avoids sending a hostname, account name, or serial-like
-  // identifier to the paired phone. The owner can differentiate workers by
-  // pairing them one at a time and activating them deliberately.
-  return `${platform} Home Peer`;
+  const callsign = WORKER_CALLSIGNS[Math.floor(Math.random() * WORKER_CALLSIGNS.length)]!;
+  return `${platform} Peer · ${callsign}`;
+}
+
+/**
+ * The terminal is the only place a worker's Fleet Setup identity is visible
+ * from the laptop side, so both the fresh pairing and a resume announce it.
+ * A generated callsign additionally teaches the rename affordance, because
+ * nothing else on this machine ever will.
+ */
+export function workerIdentityLines(label: string, usedDefaultCallsign: boolean): string[] {
+  const lines = [`Fleet Setup shows this laptop as "${label}".`];
+  if (usedDefaultCallsign) lines.push('Rename it any time: omnibus-bridge worker --label "Kitchen MacBook"');
+  return lines;
+}
+
+/**
+ * Coordinator + worker co-residence policy for one workspace. A single small
+ * machine runs one Ollama; letting the worker keep its model resident next
+ * to the coordinator's team double-loads models and starves both. The worker
+ * therefore drops to keep_alive "0" and declines context warming — clearly
+ * announced, never silently.
+ */
+export function planWorkerResidency(options: {
+  coordinatorCoResident: boolean;
+  configuredKeepAlive: string;
+}): { keepAlive: string; contextWarmingEnabled: boolean; notice?: string } {
+  if (!options.coordinatorCoResident) {
+    return { keepAlive: options.configuredKeepAlive, contextWarmingEnabled: true };
+  }
+  return {
+    keepAlive: "0",
+    contextWarmingEnabled: false,
+    notice: "[home-fleet] A Home Fleet coordinator runs from this same workspace. So one Ollama never holds two resident models on this machine, this worker will unload its model after every review (keep_alive 0) and skip shared-context warming. Run the worker from a different laptop for warm-context reviews.",
+  };
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const WORKER_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -1002,7 +1197,19 @@ function createPullProgressPrinter(): (progress: PullProgress) => void {
   };
 }
 
-async function inspectStorage(config: AppConfig): Promise<{ ready: boolean }> {
+export type StorageInspection = {
+  ready: boolean;
+  /** The existing directory whose permissions will make setup's mkdir fail. */
+  blockedBy?: string;
+};
+
+/**
+ * Storage that does not exist yet is only "will be created" if setup can in
+ * fact create it: the nearest existing ancestor of each storage path must be
+ * writable, otherwise doctor reports the blocking directory instead of an
+ * optimistic promise that setup will immediately break.
+ */
+export async function inspectStorage(config: Pick<AppConfig, "auditPath" | "statePath">): Promise<StorageInspection> {
   try {
     await Promise.all([
       access(config.auditPath, fsConstants.R_OK | fsConstants.W_OK),
@@ -1010,7 +1217,29 @@ async function inspectStorage(config: AppConfig): Promise<{ ready: boolean }> {
     ]);
     return { ready: true };
   } catch {
+    for (const target of [config.auditPath, config.statePath]) {
+      const existing = await nearestExistingPath(target);
+      try {
+        await access(existing, fsConstants.W_OK);
+      } catch {
+        return { ready: false, blockedBy: existing };
+      }
+    }
     return { ready: false };
+  }
+}
+
+async function nearestExistingPath(target: string): Promise<string> {
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      await access(current, fsConstants.F_OK);
+      return current;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return current;
+      current = parent;
+    }
   }
 }
 
@@ -1021,7 +1250,7 @@ Usage:
   omnibus-bridge setup [--install-runtime] [--pull-models] [--yes] [--no-start-ollama]
   omnibus-bridge start [--install-runtime] [--pull-models] [--yes] [--no-start-ollama]
   omnibus-bridge doctor
-  omnibus-bridge worker [--join <base64url-invitation>] [--install-runtime] [--pull-models] [--yes] [--no-start-ollama]
+  omnibus-bridge worker [--join <base64url-invitation>] [--label "Kitchen MacBook"] [--install-runtime] [--pull-models] [--yes] [--no-start-ollama]
   omnibus-bridge hook install [--force] | uninstall | check [--staged] [--fix]
 
 Recommended first run:

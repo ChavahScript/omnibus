@@ -41,7 +41,7 @@ export class OllamaJsonLlm implements LocalLlm {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  public async generateJson(prompt: string, options: { timeoutMs?: number } = {}): Promise<unknown | null> {
+  public async generateJson(prompt: string, options: { timeoutMs?: number; keepAlive?: string } = {}): Promise<unknown | null> {
     const timeoutMs = options.timeoutMs ?? DEFAULT_GENERATE_TIMEOUT_MS;
     try {
       const response = await this.fetchImpl(`${this.baseUrl}/api/generate`, {
@@ -52,7 +52,10 @@ export class OllamaJsonLlm implements LocalLlm {
           prompt,
           stream: false,
           format: "json",
-          keep_alive: this.keepAlive,
+          // Background callers (ambient watchers) pass "0" so a distillation
+          // pass never extends model residency on a small laptop; foreground
+          // callers inherit the configured window.
+          keep_alive: options.keepAlive ?? this.keepAlive,
           options: { num_ctx: this.numCtx, temperature: 0 },
         }),
         signal: AbortSignal.timeout(timeoutMs),
@@ -94,7 +97,7 @@ export class OllamaJsonLlm implements LocalLlm {
  * operation. Consumers that survive this survive a cold laptop.
  */
 export class NullLlm implements LocalLlm {
-  public async generateJson(_prompt: string, _options?: { timeoutMs?: number }): Promise<unknown | null> {
+  public async generateJson(_prompt: string, _options?: { timeoutMs?: number; keepAlive?: string }): Promise<unknown | null> {
     return null;
   }
 

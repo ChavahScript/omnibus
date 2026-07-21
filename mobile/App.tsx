@@ -17,6 +17,7 @@ import {
 } from "./src/localData";
 import { colors } from "./src/theme";
 import type { LocalAppleProfile } from "./src/localData";
+import { isHomeFleetInviteStale } from "./src/types";
 import type { AgentName, BrainStatus, BridgeEvent, BridgeResumeProfile, CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, HomeFleetInvite, UsageStatus } from "./src/types";
 
 const PAIRING_ONBOARDED_KEY = "@omnibus/has-paired-laptop";
@@ -86,6 +87,11 @@ function OmnibusApp(): React.JSX.Element {
   const [fleetBusy, setFleetBusy] = useState(false);
   const [homeFleetInvite, setHomeFleetInvite] = useState<HomeFleetInvite | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
+  // Staleness bookkeeping for the one-time home-laptop invite card. Kept in
+  // refs because it describes the invite's creation moment, not render state.
+  const fleetWorkerCount = useRef(0);
+  const inviteWorkerCountAtCreation = useRef(0);
+  const inviteSeenInSnapshot = useRef(false);
   const pairingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const persistedRecoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,8 +221,8 @@ function OmnibusApp(): React.JSX.Element {
     return () => subscription.remove();
   }, [clearPersistedRecoveryTimer, startHeartbeat, stopHeartbeat]);
 
-  const append = useCallback((agent: AgentName, stage: string, text: string, correlationId?: string) => {
-    setMessages(previous => [...previous, { id: String(Date.now()) + "-" + String(Math.random()), agent, stage, text, at: new Date(), correlationId }].slice(-60));
+  const append = useCallback((agent: AgentName, stage: string, text: string, correlationId?: string, origin?: "error") => {
+    setMessages(previous => [...previous, { id: String(Date.now()) + "-" + String(Math.random()), agent, stage, text, at: new Date(), correlationId, origin }].slice(-60));
   }, []);
 
   const rememberSuccessfulPairing = useCallback(() => {
@@ -286,6 +292,15 @@ function OmnibusApp(): React.JSX.Element {
     } else if (event.type === "fleet") {
       setFleet(event.snapshot);
       if (!event.snapshot.provisioning.active) setFleetBusy(false);
+      // A displayed invite the coordinator no longer honors is misleading:
+      // clear it once a laptop joined with it or its expiry window is gone.
+      const homeFleet = event.snapshot.homeFleet;
+      setHomeFleetInvite(current => current && isHomeFleetInviteStale({
+        workerCountAtCreation: inviteWorkerCountAtCreation.current,
+        inviteSeenInSnapshot: inviteSeenInSnapshot.current,
+      }, homeFleet) ? null : current);
+      inviteSeenInSnapshot.current = Boolean(homeFleet.activeInviteExpiresAt);
+      fleetWorkerCount.current = homeFleet.workers.length;
       // On a newly paired laptop with no saved fleet, put the owner's next
       // useful action directly in reach. It opens once per pairing attempt;
       // dismissing it remains a valid choice.
@@ -296,10 +311,12 @@ function OmnibusApp(): React.JSX.Element {
     } else if (event.type === "home_fleet_invite") {
       // The one-time command lives only in this React state. It is never
       // copied to this iPhone's idea history or persisted in AsyncStorage.
+      inviteWorkerCountAtCreation.current = fleetWorkerCount.current;
+      inviteSeenInSnapshot.current = false;
       setHomeFleetInvite(event.invite);
       setFleetBusy(false);
       setFleetSetupVisible(true);
-      append("system", "home_fleet_invite", "A short-lived home-worker command is ready. Paste it only into a laptop you control on this home network.", event.invite.correlationId);
+      append("system", "home_fleet_invite", "A short-lived home laptop command is ready. Paste it only into a laptop you control on this home network.", event.invite.correlationId);
     } else if (event.type === "status") {
       append(event.agent, event.stage, event.text, event.correlationId);
     } else if (event.type === "call") {
@@ -312,7 +329,7 @@ function OmnibusApp(): React.JSX.Element {
       append(event.agent, "result", event.summary, event.correlationId);
     } else if (event.type === "error") {
       if ((event.code.startsWith("FLEET_") && event.code !== "FLEET_PROVISIONING") || event.code.startsWith("HOME_FLEET_") || event.code === "LOCAL_TEAM_BUSY" || event.code === "OLLAMA_UNAVAILABLE" || event.code === "RESEARCH_KEY_REQUIRED") setFleetBusy(false);
-      append("system", event.code, event.message, event.correlationId);
+      append("system", event.code, event.message, event.correlationId, "error");
     }
     // A pong has no feed entry by design; it only renews live presence.
   }, [append, clearPairingTimeout, clearPersistedRecoveryTimer, markBridgeResponsive, rememberSuccessfulPairing, startHeartbeat]);
@@ -335,8 +352,8 @@ function OmnibusApp(): React.JSX.Element {
       // ever stored, and another phone/laptop profile remains untouched.
       void forgetSavedBridgeSession().catch(() => undefined);
       clearPersistedRecoveryTimer();
-      setPairingError("The saved laptop session expired or changed. Scan the bridge's current one-time code to reconnect.");
-      if (wasPaired) append("system", "connection", "Laptop session changed. Scan the bridge's current terminal code to reconnect safely.");
+      setPairingError("The saved laptop session expired or changed. Scan your main laptop's current one-time code to reconnect.");
+      if (wasPaired) append("system", "connection", "Laptop session changed. Scan your main laptop's current terminal code to reconnect safely.");
     } else if (disconnect.kind === "resume-retry-exhausted") {
       // Keep the secure profile: an offline tunnel, captive portal, or laptop
       // sleep is not proof that the pairing has expired. Foreground/cold boot
@@ -346,7 +363,7 @@ function OmnibusApp(): React.JSX.Element {
     } else if (wasPaired) {
       append("system", "connection", "Laptop link closed. Pair a new terminal code to continue.");
     } else {
-      setPairingError("That pairing code was rejected or expired. Restart the bridge and scan its newly printed code.");
+      setPairingError("That pairing code was rejected or expired. Restart the laptop link on your main laptop and scan its newly printed code.");
     }
   }, [append, clearPairingTimeout, clearPersistedRecoveryTimer, forgetSavedBridgeSession, stopHeartbeat]);
 
@@ -379,7 +396,7 @@ function OmnibusApp(): React.JSX.Element {
         resumeInFlight.current = false;
         setIsConnecting(false);
         setConnectionPresence("offline");
-        setPairingError("Pairing timed out. Restart the bridge and scan the new one-time code it prints.");
+        setPairingError("Pairing timed out. Restart the laptop link on your main laptop and scan the new one-time code it prints.");
       }, 12_000);
     } catch (error) {
       setIsConnecting(false);
@@ -517,7 +534,7 @@ function OmnibusApp(): React.JSX.Element {
           connection.createHomeFleetInvite();
         } catch (error) {
           setFleetBusy(false);
-          append("system", "HOME_FLEET_INVITE_FAILED", error instanceof Error ? error.message : "Unable to create a home-worker invitation.");
+          append("system", "HOME_FLEET_INVITE_FAILED", error instanceof Error ? error.message : "Unable to create a home laptop invitation.");
         }
       }}
       onRemoveHomeFleetWorker={workerId => {
@@ -526,7 +543,7 @@ function OmnibusApp(): React.JSX.Element {
           connection.removeHomeFleetWorker(workerId);
         } catch (error) {
           setFleetBusy(false);
-          append("system", "HOME_FLEET_REMOVE_FAILED", error instanceof Error ? error.message : "Unable to remove that home worker.");
+          append("system", "HOME_FLEET_REMOVE_FAILED", error instanceof Error ? error.message : "Unable to remove that home laptop.");
         }
       }}
       onApproveHomeFleetWorker={workerId => {
@@ -535,7 +552,7 @@ function OmnibusApp(): React.JSX.Element {
           connection.approveHomeFleetWorker(workerId);
         } catch (error) {
           setFleetBusy(false);
-          append("system", "HOME_FLEET_APPROVE_FAILED", error instanceof Error ? error.message : "Unable to activate that home worker.");
+          append("system", "HOME_FLEET_APPROVE_FAILED", error instanceof Error ? error.message : "Unable to activate that home laptop.");
         }
       }}
     /> : null}

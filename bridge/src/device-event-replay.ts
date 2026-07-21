@@ -190,11 +190,15 @@ export class DeviceEventReplay {
 
   private evictForCapacity(): void {
     while (this.streams.size >= this.maxDevices) {
-      const candidates = [...this.streams.entries()]
-        .sort(([, left], [, right]) => Number(Boolean(left.binding)) - Number(Boolean(right.binding)) || left.touchedAt - right.touchedAt);
-      const oldest = candidates[0]?.[0];
-      if (!oldest) return;
-      this.streams.delete(oldest);
+      // Only an unbound (disconnected) stream is ever an LRU victim. A bound
+      // stream is a live phone socket whose in-flight brief must not be lost
+      // to capacity pressure; when every stream is bound, accept a temporary
+      // overrun — it is bounded by the number of concurrently open sockets.
+      const oldestUnbound = [...this.streams.entries()]
+        .filter(([, stream]) => !stream.binding)
+        .sort(([, left], [, right]) => left.touchedAt - right.touchedAt)[0]?.[0];
+      if (!oldestUnbound) return;
+      this.streams.delete(oldestUnbound);
     }
   }
 }

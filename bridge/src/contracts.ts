@@ -235,6 +235,56 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 /**
+ * A phone-safe description of why a client frame was rejected. Codes are
+ * deliberately coarse: the common self-serve mistakes (idea length) get their
+ * own codes so the app can react inline, while everything else collapses to
+ * INVALID_MESSAGE with humane text that never echoes raw zod internals.
+ */
+export type ClientMessageRejection = {
+  code: "IDEA_TOO_SHORT" | "IDEA_TOO_LONG" | "INVALID_MESSAGE";
+  message: string;
+  /** Present only when the client supplied a well-formed UUID correlation id. */
+  correlationId?: string;
+};
+
+const UUID_LIKE_CORRELATION_ID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * Recovers a correlation id from an otherwise-invalid decoded frame so the
+ * app can attach the rejection to the action that caused it. Only a bounded,
+ * strictly UUID-shaped string is echoed back; arbitrary client text is never
+ * reflected into an event stream that may be journaled and replayed.
+ */
+export function salvageCorrelationId(decoded: unknown): string | undefined {
+  if (typeof decoded !== "object" || decoded === null) return undefined;
+  const candidate = (decoded as Record<string, unknown>).correlationId;
+  if (typeof candidate !== "string" || candidate.length > 64) return undefined;
+  return UUID_LIKE_CORRELATION_ID.test(candidate) ? candidate : undefined;
+}
+
+/**
+ * Classifies a schema rejection into a humane, actionable error event body.
+ * The zod issue paths (not client-controlled text) drive classification, so
+ * a malicious frame cannot select a misleading message for a different field.
+ */
+export function classifyClientMessageRejection(decoded: unknown, error: z.ZodError): ClientMessageRejection {
+  const correlationId = salvageCorrelationId(decoded);
+  const directiveIssue = error.issues.find(issue => issue.path[0] === "directive");
+  if (directiveIssue?.code === "too_small") {
+    return { code: "IDEA_TOO_SHORT", message: "Your idea needs at least 3 characters.", correlationId };
+  }
+  if (directiveIssue?.code === "too_big") {
+    return { code: "IDEA_TOO_LONG", message: "Your idea is too long (max 12,000 characters). Split it into two ideas.", correlationId };
+  }
+  const unknownType = error.issues.some(issue => issue.code === "invalid_union_discriminator"
+    || (issue.path[0] === "type" && issue.path.length === 1));
+  if (unknownType) {
+    return { code: "INVALID_MESSAGE", message: "This bridge doesn't recognize that message type. Update the Omnibus app and try again.", correlationId };
+  }
+  return { code: "INVALID_MESSAGE", message: "Invalid dashboard message.", correlationId };
+}
+
+/**
  * The persisted queue intentionally stores only owner-supplied commands and
  * compact operational metadata.  It does not store model output or hidden
  * reasoning; those belong in the audited result and serializable memory.
@@ -303,6 +353,11 @@ export type WorkspaceContext = z.infer<typeof WorkspaceContextSchema>;
  */
 export const BrainStatusEventSchema = z.object({
   enabled: z.boolean(),
+  /**
+   * The adaptive sizing tier the bridge resolved for its own hardware. It is
+   * a capacity label, not a machine inventory: no byte counts cross here.
+   */
+  capacityTier: z.enum(["compact", "balanced", "power", "studio"]).optional(),
   nodes: z.number().int().nonnegative(),
   facts: z.number().int().nonnegative(),
   invalidatedFacts: z.number().int().nonnegative(),
@@ -365,11 +420,15 @@ export type DeviceEventReplaySnapshot = {
 };
 
 export function isReplayableBridgeEvent(event: BridgeEvent): event is ReplayableBridgeEvent {
+  // A context-free protocol error (no correlationId) describes one dead
+  // socket's malformed frame, not the device's work. Replaying it after a
+  // resume would surface a phantom toast about nothing; only errors tied to
+  // a specific command remain part of the recovery view.
+  if (event.type === "error") return typeof event.correlationId === "string" && event.correlationId.length > 0;
   return event.type === "status"
     || event.type === "call"
     || event.type === "usage"
-    || event.type === "result"
-    || event.type === "error";
+    || event.type === "result";
 }
 
 export const AuditResultSchema = z.object({

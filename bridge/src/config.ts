@@ -1,11 +1,54 @@
 import "dotenv/config";
+import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
+
+/**
+ * Installing the bridge turns a laptop into a small always-on database and
+ * inference host. Those duties must fit the machine they land on, so any
+ * capacity knob the owner did NOT set explicitly is sized from the laptop's
+ * physical memory instead of a one-size default. The tiers deliberately
+ * mirror the phone-facing fleet profiles (compact / balanced / power /
+ * studio) so the whole product speaks one sizing language.
+ */
+export type BrainCapacityTier = "compact" | "balanced" | "power" | "studio";
+
+type AdaptiveDefaults = {
+  /** Context window requested from local Ollama when no profile chose one. */
+  ollamaNumCtx: number;
+  brainMaxNodes: number;
+  brainMaxFacts: number;
+  brainRetrievalTopK: number;
+  brainRetrievalMaxChars: number;
+  /** Slower ambient observation on small machines; the watcher is a guest. */
+  ambientGitPollMs: number;
+  /** Worker model residency after a context bundle: RAM is the real cost. */
+  homeFleetWorkerKeepAlive: string;
+};
+
+const GIB = 1024 ** 3;
+
+const ADAPTIVE_TIERS: Array<{ tier: BrainCapacityTier; minTotalMemoryBytes: number; defaults: AdaptiveDefaults }> = [
+  { tier: "studio", minTotalMemoryBytes: 48 * GIB, defaults: { ollamaNumCtx: 32_768, brainMaxNodes: 8_000, brainMaxFacts: 24_000, brainRetrievalTopK: 16, brainRetrievalMaxChars: 6_000, ambientGitPollMs: 45_000, homeFleetWorkerKeepAlive: "10m" } },
+  { tier: "power", minTotalMemoryBytes: 24 * GIB, defaults: { ollamaNumCtx: 32_768, brainMaxNodes: 4_000, brainMaxFacts: 12_000, brainRetrievalTopK: 12, brainRetrievalMaxChars: 4_000, ambientGitPollMs: 45_000, homeFleetWorkerKeepAlive: "10m" } },
+  { tier: "balanced", minTotalMemoryBytes: 12 * GIB, defaults: { ollamaNumCtx: 16_384, brainMaxNodes: 3_000, brainMaxFacts: 8_000, brainRetrievalTopK: 10, brainRetrievalMaxChars: 3_200, ambientGitPollMs: 60_000, homeFleetWorkerKeepAlive: "5m" } },
+  { tier: "compact", minTotalMemoryBytes: 0, defaults: { ollamaNumCtx: 8_192, brainMaxNodes: 1_500, brainMaxFacts: 4_000, brainRetrievalTopK: 8, brainRetrievalMaxChars: 2_400, ambientGitPollMs: 90_000, homeFleetWorkerKeepAlive: "2m" } },
+];
+
+export function resolveBrainCapacityTier(totalMemoryBytes: number): BrainCapacityTier {
+  return (ADAPTIVE_TIERS.find(entry => totalMemoryBytes >= entry.minTotalMemoryBytes) ?? ADAPTIVE_TIERS[ADAPTIVE_TIERS.length - 1]!).tier;
+}
 
 const BooleanFromEnv = z.enum(["true", "false"]).transform(value => value === "true");
 const Currency = z.coerce.number().finite().nonnegative();
 
-const ConfigSchema = z.object({
+/**
+ * The zero-configuration local team. Exported so user-facing commands can
+ * recognize "the owner never chose a model" without repeating the tag.
+ */
+export const DEFAULT_LOCAL_MODEL = "qwen2.5-coder:7b-instruct-q4_K_M";
+
+const ConfigObjectSchema = z.object({
   port: z.coerce.number().int().min(1024).max(65535).default(8787),
   // An empty value in the checked-in .env.example means "generate/persist a
   // safe workspace relay name", not a configuration error.
@@ -38,11 +81,11 @@ const ConfigSchema = z.object({
   // used only for a local filesystem-capacity probe and never leaves the
   // laptop in the paired capability snapshot.
   ollamaModelsPath: z.string().trim().min(1).optional(),
-  ollamaModel: z.string().min(1).default("qwen2.5-coder:7b-instruct-q4_K_M"),
+  ollamaModel: z.string().min(1).default(DEFAULT_LOCAL_MODEL),
   // This can point at a larger local model than the fast auditor when the
   // laptop has the available memory. It defaults to the auditor model so a
   // fresh install remains zero-configuration and fully local.
-  ollamaDeveloperModel: z.string().min(1).default("qwen2.5-coder:7b-instruct-q4_K_M"),
+  ollamaDeveloperModel: z.string().min(1).default(DEFAULT_LOCAL_MODEL),
   ollamaNumCtx: z.coerce.number().int().min(4096).max(131_072).default(32_768),
   // Sent on each local generation request. It bounds how long a selected
   // fleet remains resident after a job without changing Ollama's global
@@ -139,87 +182,227 @@ const ConfigSchema = z.object({
   // compare a staged diff against retrieved anti-patterns. Advisory only and
   // fail-open: a missing model can never brick an owner's commit.
   precommitLlmEnabled: BooleanFromEnv.default("false"),
-}).superRefine((value, ctx) => {
+});
+
+const ConfigSchema = ConfigObjectSchema.superRefine((value, ctx) => {
   if (value.developerProvider === "responses" && !value.openaiApiKey) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "OPENAI_API_KEY is required for DEVELOPER_PROVIDER=responses" });
   }
 });
 
+/**
+ * The single source of truth mapping each config key to the environment
+ * variable an owner actually types. Configuration errors are reported in this
+ * vocabulary: internal camelCase key names must never appear in a message the
+ * owner is expected to act on.
+ */
+const ENV_SOURCES = {
+  port: "PORT",
+  tunnelSubdomain: "TUNNEL_SUBDOMAIN",
+  workspaceRoot: "WORKSPACE_ROOT",
+  hostExecutionEnabled: "HOST_EXECUTION_ENABLED",
+  keepAwakeEnabled: "OMNIBUS_KEEP_AWAKE",
+  developerProvider: "DEVELOPER_PROVIDER",
+  openaiApiKey: "OPENAI_API_KEY",
+  openaiModel: "OPENAI_MODEL",
+  codexCommand: "CODEX_COMMAND",
+  openAiInputUsdPerMillion: "OPENAI_INPUT_USD_PER_MILLION",
+  openAiOutputUsdPerMillion: "OPENAI_OUTPUT_USD_PER_MILLION",
+  maxDeveloperOutputTokens: "MAX_DEVELOPER_OUTPUT_TOKENS",
+  ollamaBaseUrl: "OLLAMA_BASE_URL",
+  ollamaModelsPath: "OLLAMA_MODELS",
+  ollamaModel: "OLLAMA_MODEL",
+  ollamaDeveloperModel: "OLLAMA_DEVELOPER_MODEL",
+  ollamaNumCtx: "OLLAMA_NUM_CTX",
+  ollamaKeepAlive: "OMNIBUS_OLLAMA_KEEP_ALIVE",
+  homeFleetCoordinatorPort: "HOME_FLEET_COORDINATOR_PORT",
+  homeFleetWorkerPort: "HOME_FLEET_WORKER_PORT",
+  homeFleetBindHost: "HOME_FLEET_BIND_HOST",
+  homeFleetMaxWorkers: "HOME_FLEET_MAX_WORKERS",
+  homeFleetWorkerModel: "HOME_FLEET_WORKER_MODEL",
+  homeFleetWorkerNumCtx: "HOME_FLEET_WORKER_NUM_CTX",
+  homeFleetWorkerKeepAlive: "HOME_FLEET_WORKER_KEEP_ALIVE",
+  webResearchEnabled: "WEB_RESEARCH_ENABLED",
+  webResearchProvider: "WEB_RESEARCH_PROVIDER",
+  braveSearchApiKey: "BRAVE_SEARCH_API_KEY",
+  webResearchMaxResults: "WEB_RESEARCH_MAX_RESULTS",
+  webResearchTimeoutMs: "WEB_RESEARCH_TIMEOUT_MS",
+  webResearchQueryMaxChars: "WEB_RESEARCH_QUERY_MAX_CHARS",
+  webResearchMaxContentChars: "WEB_RESEARCH_MAX_CONTENT_CHARS",
+  higgsfieldCommand: "HIGGSFIELD_COMMAND",
+  higgsfieldExecutionEnabled: "HIGGSFIELD_EXECUTION_ENABLED",
+  higgsfieldSoulId: "HIGGSFIELD_SOUL_ID",
+  auditDir: "AUDIT_DIR",
+  stateDir: "STATE_DIR",
+  queueMaxPending: "QUEUE_MAX_PENDING",
+  queueMaxAttempts: "QUEUE_MAX_ATTEMPTS",
+  queueRetryBaseMs: "QUEUE_RETRY_BASE_MS",
+  workspaceContextMaxFiles: "WORKSPACE_CONTEXT_MAX_FILES",
+  workspaceContextMaxSnippets: "WORKSPACE_CONTEXT_MAX_SNIPPETS",
+  workspaceContextMaxChars: "WORKSPACE_CONTEXT_MAX_CHARS",
+  secondBrainEnabled: "OMNIBUS_SECOND_BRAIN",
+  ambientGitPollMs: "OMNIBUS_AMBIENT_GIT_POLL_MS",
+  ambientCheckCommand: "OMNIBUS_AMBIENT_CHECK_COMMAND",
+  ambientCheckIntervalMs: "OMNIBUS_AMBIENT_CHECK_INTERVAL_MS",
+  brainMaxNodes: "OMNIBUS_BRAIN_MAX_NODES",
+  brainMaxFacts: "OMNIBUS_BRAIN_MAX_FACTS",
+  brainRetrievalTopK: "OMNIBUS_BRAIN_RETRIEVAL_TOP_K",
+  brainRetrievalMaxChars: "OMNIBUS_BRAIN_RETRIEVAL_MAX_CHARS",
+  homeFleetContextSharing: "HOME_FLEET_CONTEXT_SHARING",
+  precommitTimeoutMs: "OMNIBUS_PRECOMMIT_TIMEOUT_MS",
+  precommitLlmEnabled: "OMNIBUS_PRECOMMIT_LLM",
+} as const satisfies Record<keyof z.infer<typeof ConfigObjectSchema>, string>;
+
+type ConfigKey = keyof typeof ENV_SOURCES;
+
+/**
+ * The plain-language shape of one schema field, recovered by unwrapping the
+ * default/optional/effect layers. Deriving this from the schema itself (not a
+ * parallel hand-written table) keeps error text honest when a bound changes.
+ */
+type FieldFacts =
+  | { kind: "number"; min?: number; max?: number }
+  | { kind: "duration" }
+  | { kind: "boolean" }
+  | { kind: "enum"; values: string[] }
+  | { kind: "url" }
+  | { kind: "other" };
+
+function fieldFacts(key: ConfigKey): FieldFacts {
+  let node: z.ZodTypeAny | undefined = (ConfigObjectSchema.shape as Record<string, z.ZodTypeAny>)[key];
+  while (node) {
+    if (node instanceof z.ZodDefault) { node = node._def.innerType as z.ZodTypeAny; continue; }
+    if (node instanceof z.ZodOptional || node instanceof z.ZodNullable) { node = node.unwrap() as z.ZodTypeAny; continue; }
+    if (node instanceof z.ZodEffects) { node = node._def.schema as z.ZodTypeAny; continue; }
+    break;
+  }
+  if (node instanceof z.ZodNumber) {
+    let min: number | undefined;
+    let max: number | undefined;
+    for (const check of node._def.checks) {
+      if (check.kind === "min") min = check.value;
+      if (check.kind === "max") max = check.value;
+    }
+    return { kind: "number", ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
+  }
+  if (node instanceof z.ZodEnum) {
+    const values = node._def.values as string[];
+    if (values.length === 2 && values.includes("true") && values.includes("false")) return { kind: "boolean" };
+    return { kind: "enum", values };
+  }
+  if (node instanceof z.ZodLiteral) return { kind: "enum", values: [String(node._def.value)] };
+  if (node instanceof z.ZodString) {
+    const checks = node._def.checks;
+    // The keep-alive fields are the only regex-guarded durations; recognize
+    // them by their unit alternation instead of hard-coding key names.
+    if (checks.some(check => check.kind === "regex" && check.regex.source.includes("ms|s|m|h"))) return { kind: "duration" };
+    if (checks.some(check => check.kind === "url")) return { kind: "url" };
+  }
+  return { kind: "other" };
+}
+
+/** Bounded, control-character-free echo of the offending environment value. */
+function clipEnvValue(value: string): string {
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, " ");
+  return cleaned.length > 60 ? `${cleaned.slice(0, 60)}…` : cleaned;
+}
+
+function describeConfigIssue(issue: z.ZodIssue, env: NodeJS.ProcessEnv): string {
+  const key = typeof issue.path[0] === "string" ? issue.path[0] as ConfigKey : undefined;
+  // superRefine issues carry no path and are already written in ENV VAR terms.
+  if (!key) return issue.message;
+  const envVar = ENV_SOURCES[key] ?? key;
+  const raw = env[envVar];
+  const shown = raw === undefined ? envVar : `${envVar}=${clipEnvValue(raw)}`;
+  const facts = fieldFacts(key);
+  switch (facts.kind) {
+    case "duration":
+      return `${shown} must look like 5m, 30s, 0 or -1`;
+    case "number": {
+      const bounds = facts.min !== undefined && facts.max !== undefined
+        ? `${facts.min}–${facts.max}`
+        : facts.min !== undefined ? `${facts.min} or more`
+        : facts.max !== undefined ? `up to ${facts.max}` : "";
+      const allowed = bounds ? ` (allowed ${bounds})` : "";
+      if (issue.code === z.ZodIssueCode.too_small || issue.code === z.ZodIssueCode.too_big) {
+        return `${shown} is out of range${allowed}`;
+      }
+      if (issue.code === z.ZodIssueCode.invalid_type && issue.expected === "integer") {
+        return `${shown} is not a whole number${allowed}`;
+      }
+      return `${shown} is not a number${allowed}`;
+    }
+    case "boolean":
+      return `${shown} must be true or false`;
+    case "enum":
+      return `${shown} must be one of: ${facts.values.join(", ")}`;
+    case "url":
+      return `${shown} must be a full URL such as http://127.0.0.1:11434`;
+    case "other":
+      return `${shown}: ${issue.message}`;
+  }
+}
+
+/**
+ * One actionable line per problem, phrased with the ENV VAR the owner can
+ * actually change — never raw Zod JSON or internal camelCase key names.
+ */
+export function formatConfigIssues(issues: z.ZodIssue[], env: NodeJS.ProcessEnv): string {
+  const lines = issues.slice(0, 20).map(issue => `  - ${describeConfigIssue(issue, env)}`);
+  return ["Bridge configuration is invalid:", ...lines].join("\n");
+}
+
 export type AppConfig = z.infer<typeof ConfigSchema> & {
   workspacePath: string;
   auditPath: string;
   statePath: string;
+  /** The adaptive sizing tier this configuration resolved against. */
+  brainCapacityTier: BrainCapacityTier;
 };
 
 export type LoadConfigOptions = {
   /** Mainly useful for deterministic tests and embedded CLI callers. */
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Injectable for deterministic tests; defaults to this machine's RAM. */
+  totalMemoryBytes?: number;
 };
 
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const env = options.env ?? process.env;
-  const parsed = ConfigSchema.parse({
-    port: env.PORT,
-    tunnelSubdomain: env.TUNNEL_SUBDOMAIN,
-    workspaceRoot: env.WORKSPACE_ROOT,
-    hostExecutionEnabled: env.HOST_EXECUTION_ENABLED,
-    keepAwakeEnabled: env.OMNIBUS_KEEP_AWAKE,
-    developerProvider: env.DEVELOPER_PROVIDER,
-    openaiApiKey: env.OPENAI_API_KEY,
-    openaiModel: env.OPENAI_MODEL,
-    codexCommand: env.CODEX_COMMAND,
-    openAiInputUsdPerMillion: env.OPENAI_INPUT_USD_PER_MILLION,
-    openAiOutputUsdPerMillion: env.OPENAI_OUTPUT_USD_PER_MILLION,
-    maxDeveloperOutputTokens: env.MAX_DEVELOPER_OUTPUT_TOKENS,
-    ollamaBaseUrl: env.OLLAMA_BASE_URL,
-    ollamaModelsPath: env.OLLAMA_MODELS,
-    ollamaModel: env.OLLAMA_MODEL,
-    ollamaDeveloperModel: env.OLLAMA_DEVELOPER_MODEL,
-    ollamaNumCtx: env.OLLAMA_NUM_CTX,
-    ollamaKeepAlive: env.OMNIBUS_OLLAMA_KEEP_ALIVE,
-    homeFleetCoordinatorPort: env.HOME_FLEET_COORDINATOR_PORT,
-    homeFleetWorkerPort: env.HOME_FLEET_WORKER_PORT,
-    homeFleetBindHost: env.HOME_FLEET_BIND_HOST,
-    homeFleetMaxWorkers: env.HOME_FLEET_MAX_WORKERS,
-    homeFleetWorkerModel: env.HOME_FLEET_WORKER_MODEL,
-    homeFleetWorkerNumCtx: env.HOME_FLEET_WORKER_NUM_CTX,
-    homeFleetWorkerKeepAlive: env.HOME_FLEET_WORKER_KEEP_ALIVE,
-    webResearchEnabled: env.WEB_RESEARCH_ENABLED,
-    webResearchProvider: env.WEB_RESEARCH_PROVIDER,
-    braveSearchApiKey: env.BRAVE_SEARCH_API_KEY,
-    webResearchMaxResults: env.WEB_RESEARCH_MAX_RESULTS,
-    webResearchTimeoutMs: env.WEB_RESEARCH_TIMEOUT_MS,
-    webResearchQueryMaxChars: env.WEB_RESEARCH_QUERY_MAX_CHARS,
-    webResearchMaxContentChars: env.WEB_RESEARCH_MAX_CONTENT_CHARS,
-    higgsfieldCommand: env.HIGGSFIELD_COMMAND,
-    higgsfieldExecutionEnabled: env.HIGGSFIELD_EXECUTION_ENABLED,
-    higgsfieldSoulId: env.HIGGSFIELD_SOUL_ID,
-    auditDir: env.AUDIT_DIR,
-    stateDir: env.STATE_DIR,
-    queueMaxPending: env.QUEUE_MAX_PENDING,
-    queueMaxAttempts: env.QUEUE_MAX_ATTEMPTS,
-    queueRetryBaseMs: env.QUEUE_RETRY_BASE_MS,
-    workspaceContextMaxFiles: env.WORKSPACE_CONTEXT_MAX_FILES,
-    workspaceContextMaxSnippets: env.WORKSPACE_CONTEXT_MAX_SNIPPETS,
-    workspaceContextMaxChars: env.WORKSPACE_CONTEXT_MAX_CHARS,
-    secondBrainEnabled: env.OMNIBUS_SECOND_BRAIN,
-    ambientGitPollMs: env.OMNIBUS_AMBIENT_GIT_POLL_MS,
-    ambientCheckCommand: env.OMNIBUS_AMBIENT_CHECK_COMMAND,
-    ambientCheckIntervalMs: env.OMNIBUS_AMBIENT_CHECK_INTERVAL_MS,
-    brainMaxNodes: env.OMNIBUS_BRAIN_MAX_NODES,
-    brainMaxFacts: env.OMNIBUS_BRAIN_MAX_FACTS,
-    brainRetrievalTopK: env.OMNIBUS_BRAIN_RETRIEVAL_TOP_K,
-    brainRetrievalMaxChars: env.OMNIBUS_BRAIN_RETRIEVAL_MAX_CHARS,
-    homeFleetContextSharing: env.HOME_FLEET_CONTEXT_SHARING,
-    precommitTimeoutMs: env.OMNIBUS_PRECOMMIT_TIMEOUT_MS,
-    precommitLlmEnabled: env.OMNIBUS_PRECOMMIT_LLM,
-  });
+  const rawInput: Partial<Record<ConfigKey, string | undefined>> = {};
+  for (const [key, envVar] of Object.entries(ENV_SOURCES) as Array<[ConfigKey, string]>) {
+    rawInput[key] = env[envVar];
+  }
+  const result = ConfigSchema.safeParse(rawInput);
+  if (!result.success) {
+    throw new Error(formatConfigIssues(result.error.issues, env));
+  }
+  const parsed = result.data;
+
+  // Adaptive overlay: a knob the owner set explicitly (env var present)
+  // always wins; anything left at its schema default is re-sized to this
+  // laptop's physical memory so a fresh install never asks an 8 GB machine
+  // for a 32k context window or a 12k-fact knowledge graph.
+  const totalMemoryBytes = options.totalMemoryBytes ?? os.totalmem();
+  const tierEntry = ADAPTIVE_TIERS.find(entry => totalMemoryBytes >= entry.minTotalMemoryBytes) ?? ADAPTIVE_TIERS[ADAPTIVE_TIERS.length - 1]!;
+  const isSet = (value: string | undefined): boolean => typeof value === "string" && value.trim().length > 0;
+  const adapted = {
+    ollamaNumCtx: isSet(env.OLLAMA_NUM_CTX) ? parsed.ollamaNumCtx : tierEntry.defaults.ollamaNumCtx,
+    brainMaxNodes: isSet(env.OMNIBUS_BRAIN_MAX_NODES) ? parsed.brainMaxNodes : tierEntry.defaults.brainMaxNodes,
+    brainMaxFacts: isSet(env.OMNIBUS_BRAIN_MAX_FACTS) ? parsed.brainMaxFacts : tierEntry.defaults.brainMaxFacts,
+    brainRetrievalTopK: isSet(env.OMNIBUS_BRAIN_RETRIEVAL_TOP_K) ? parsed.brainRetrievalTopK : tierEntry.defaults.brainRetrievalTopK,
+    brainRetrievalMaxChars: isSet(env.OMNIBUS_BRAIN_RETRIEVAL_MAX_CHARS) ? parsed.brainRetrievalMaxChars : tierEntry.defaults.brainRetrievalMaxChars,
+    ambientGitPollMs: isSet(env.OMNIBUS_AMBIENT_GIT_POLL_MS) ? parsed.ambientGitPollMs : tierEntry.defaults.ambientGitPollMs,
+    homeFleetWorkerKeepAlive: isSet(env.HOME_FLEET_WORKER_KEEP_ALIVE) ? parsed.homeFleetWorkerKeepAlive : tierEntry.defaults.homeFleetWorkerKeepAlive,
+  };
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const workspacePath = resolveOwnerPath(cwd, parsed.workspaceRoot);
   return {
     ...parsed,
+    ...adapted,
+    brainCapacityTier: tierEntry.tier,
     workspacePath,
     ...(parsed.ollamaModelsPath ? { ollamaModelsPath: resolveOwnerPath(workspacePath, parsed.ollamaModelsPath) } : {}),
     auditPath: resolveOwnerPath(workspacePath, parsed.auditDir),

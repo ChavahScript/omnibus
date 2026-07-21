@@ -453,3 +453,32 @@ async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<voi
     await new Promise(resolve => setTimeout(resolve, 10));
   }
 }
+
+test("an owner rename rides the signed heartbeat once and updates the coordinator's snapshot", async () => {
+  const coordinator = new HomeFleetCoordinator();
+  const worker = new HomeFleetWorker({ label: "macOS Peer · Cedar", installedModels: ["qwen2.5-coder:1.5b"] });
+  try {
+    await coordinator.listen();
+    await worker.listen();
+    await worker.join(coordinator.issueJoinInvitation());
+    assert.equal(coordinator.snapshot().workers[0]?.label, "macOS Peer · Cedar");
+
+    // Simulate `worker --label "Kitchen MacBook"` on a later run: same
+    // pairing, new label, advertisement armed.
+    const renamed = HomeFleetWorker.fromPrivateState(
+      { label: "Kitchen MacBook", advertiseLabelUpdate: true },
+      worker.exportPrivateState(),
+    );
+    await renamed.listen();
+    assert.equal((await renamed.heartbeat()).status, "ok");
+    assert.equal(coordinator.snapshot().workers[0]?.label, "Kitchen MacBook");
+
+    // The advertisement stops after one acknowledged beat, and a plain
+    // heartbeat (legacy payload shape) still verifies.
+    assert.equal((await renamed.heartbeat()).status, "ok");
+    assert.equal(coordinator.snapshot().workers[0]?.label, "Kitchen MacBook");
+    await renamed.close();
+  } finally {
+    await Promise.allSettled([worker.close(), coordinator.close()]);
+  }
+});

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,6 +8,8 @@ import {
   OLLAMA_MACOS_DOWNLOAD_URL,
   OLLAMA_WINDOWS_INSTALL_URL,
   createOllamaRuntimeInstallPlan,
+  describeProbeFailure,
+  ensureOllamaService,
   initializeLocalInfrastructure,
   isLoopbackOllamaBaseUrl,
   missingLocalModels,
@@ -96,6 +98,53 @@ test("local infrastructure is initialized in the caller workspace, not the npm p
     await access(path.join(workspace, ".omnibus", "audit"));
     const marker = await readFile(path.join(workspace, ".omnibus", "state", "local-intelligence.json"), "utf8");
     assert.match(marker, /"runtime": "omnibus-bridge"/);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a declined auto-start explains every next step, not just the failure", async () => {
+  const result = await ensureOllamaService({ ollamaBaseUrl: "http://127.0.0.1:9" }, { startIfNeeded: false });
+  assert.equal(result.ready, false);
+  assert.match(result.error ?? "", /Start Ollama yourself/);
+  assert.match(result.error ?? "", /--no-start-ollama/);
+  assert.match(result.error ?? "", /OLLAMA_BASE_URL/);
+});
+
+test("probe failures surface the network cause code instead of 'fetch failed'", () => {
+  const refused = new Error("fetch failed");
+  (refused as Error & { cause?: unknown }).cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:11434"), { code: "ECONNREFUSED" });
+  assert.match(describeProbeFailure(refused), /connection refused/);
+  assert.match(describeProbeFailure(refused), /ECONNREFUSED/);
+  assert.doesNotMatch(describeProbeFailure(refused), /fetch failed/);
+
+  // Undici wraps multi-address connect failures in an AggregateError cause.
+  const aggregate = new Error("fetch failed");
+  (aggregate as Error & { cause?: unknown }).cause = { errors: [{ code: "ENOTFOUND" }] };
+  assert.match(describeProbeFailure(aggregate), /could not be resolved/);
+  assert.match(describeProbeFailure(aggregate), /ENOTFOUND/);
+
+  const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  assert.match(describeProbeFailure(timeout), /timed out/);
+
+  // Unmapped shapes fall back to the original message, never crash.
+  assert.equal(describeProbeFailure(new Error("HTTP 500")), "HTTP 500");
+});
+
+test("storage bootstrap failure names the blocked directory and WORKSPACE_ROOT", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "omnibus-bridge-test-"));
+  try {
+    const locked = path.join(workspace, "locked");
+    await mkdir(locked, { mode: 0o555 });
+    const config = loadConfig({ cwd: workspace, env: { WORKSPACE_ROOT: locked } });
+    await assert.rejects(initializeLocalInfrastructure(config), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Could not create the local Omnibus storage directory/);
+      assert.ok(error.message.includes(path.join(locked, ".omnibus")));
+      assert.match(error.message, /WORKSPACE_ROOT/);
+      assert.match(error.message, /EACCES/);
+      return true;
+    });
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -54,7 +54,13 @@ const MAX_REPORT_CHARS = 60_000;
 /** Minimum wall-clock remaining before the advisory layer even starts. */
 const MIN_ADVISORY_BUDGET_MS = 500;
 
-export type RunCommandResult = { ok: boolean; stdout: string; stderr: string };
+export type RunCommandResult = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  /** Process exit status when the command ran to completion; git uses 128 for "not a repository". */
+  exitCode?: number;
+};
 
 export type RunCommand = (
   command: string,
@@ -151,7 +157,7 @@ export async function installPreCommitHook(
       return {
         installed: false,
         hookPath,
-        reason: `An existing hook at .git/hooks/${HOOK_FILE} was not written by omnibus-bridge. Re-run with force to back it up to .git/hooks/${BACKUP_FILE} and chain it after the gate.`,
+        reason: `An existing hook at .git/hooks/${HOOK_FILE} was not written by omnibus-bridge. Re-run with --force to back it up to .git/hooks/${BACKUP_FILE} and chain it after the gate.`,
       };
     }
     // A second force-install must not overwrite the first backup — that
@@ -240,6 +246,28 @@ export async function runPreCommitCheck(options: PreCommitCheckOptions): Promise
   // octal-escaped-and-quoted, which would otherwise defeat the extension
   // filter and `git show :<path>` — silently exempting those files from the
   // gate. A read-only -c override; no repository config is touched.
+  // Repository membership is probed explicitly: outside a repo, `git diff
+  // --cached` degenerates into --no-index mode and fails with "unknown
+  // option" (exit 129), never the recognizable "not a git repository", so
+  // classifying the lister's failure alone mislabels the everyday case.
+  const probe = await run("git", ["rev-parse", "--is-inside-work-tree"], {
+    cwd,
+    timeoutMs: Math.max(1, remaining()),
+  }).catch((): RunCommandResult => ({ ok: false, stdout: "", stderr: "" }));
+  if (!probe.ok) {
+    const notRepository = probe.exitCode === 128 || /not a git repository/i.test(probe.stderr);
+    return {
+      ok: true,
+      checkedFiles: 0,
+      blocking: 0,
+      warnings: 0,
+      fixedFiles: [],
+      report: notRepository
+        ? "Pre-commit gate: this directory is not a git repository, so there are no staged files to check. Gate skipped — fail-open outside a repository."
+        : "Pre-commit gate: could not reach git (unavailable or timed out). Gate skipped — fail-open for missing tooling.",
+    };
+  }
+
   const listed = await run("git", ["-c", "core.quotePath=false", "diff", "--cached", "--name-only", "--diff-filter=ACM"], {
     cwd,
     timeoutMs: Math.max(1, remaining()),
@@ -466,11 +494,11 @@ const defaultRunCommand: RunCommand = (command, args, options) =>
     let stderr = "";
     let stdoutBytes = 0;
     let settled = false;
-    const finish = (ok: boolean): void => {
+    const finish = (ok: boolean, exitCode?: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ ok, stdout, stderr });
+      resolve({ ok, stdout, stderr, ...(exitCode === undefined ? {} : { exitCode }) });
     };
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -492,5 +520,5 @@ const defaultRunCommand: RunCommand = (command, args, options) =>
       if (stderr.length < 8_192) stderr += chunk.toString("utf8");
     });
     child.on("error", () => finish(false));
-    child.on("close", code => finish(code === 0));
+    child.on("close", code => finish(code === 0, code ?? undefined));
   });
