@@ -10,7 +10,7 @@ Two ideas kept us up at night. First, **idle hardware is an untapped fleet**: a 
 
 ## What it does
 
-Omnibus pairs an iPhone to a laptop with a one-time QR code. You type a rough idea into a single text field; a local agent pipeline — an **Auditor** that enriches the idea with bounded workspace context, then a **Developer** that composes the result — returns a decision-ready brief and a paste-ready IDE prompt. Everything runs on local Ollama models. No accounts, no API keys, no idea ever leaves your network without an explicit per-idea consent.
+Omnibus pairs an iPhone to a laptop with a one-time QR code. You type a rough idea into a single text field; a local agent pipeline — an **Auditor** that enriches the idea with bounded workspace context, then a **Developer** that composes the result — returns a decision-ready brief and a paste-ready IDE prompt. By default everything runs on local Ollama models — no accounts, no API keys — and nothing is shared with an outside service or another machine without its own per-idea consent switch (web research and Home Fleet each have one). Cloud provider modes exist only as explicit laptop-side opt-in configuration.
 
 Around that core, four systems make it an actual "second brain":
 
@@ -20,7 +20,7 @@ Around that core, four systems make it an actual "second brain":
 
 $$\pi = (1-d)\,p \;+\; d\,W^{\top}\pi$$
 
-  where the personalization vector $p$ places its mass on the matched entity nodes, weighted by inverse node degree so rare, specific entities steer harder than hubs. One retrieval step connects a new idea to a bug fix recorded weeks ago, two hops away.
+  where the personalization vector $p$ places its mass on the matched entity nodes, down-weighted by $1/\log(2+\mathrm{deg})$ so rare, specific entities steer harder than hubs. One retrieval step connects a new idea to a bug fix recorded weeks ago, two hops away.
 - **Ambient capture + a shift-left gate.** Background watchers distill read-only git polls, optional compiler runs, and every idea/brief/peer-review into the graph — no manual note-filing. A structured anti-pattern registry (explicit `// Wrong` / `// Correct` examples) validates every generated brief, and `omnibus-bridge hook install` adds a pre-commit gate that mechanically blocks and auto-corrects known bad patterns. The gate fails open on infrastructure errors: only real findings may ever block a commit.
 
 And the part we're weirdly proudest of: **peer-to-peer prefix caching**. With an explicit opt-in, the coordinator compiles one redacted, content-addressed context bundle, seeds it to a single worker, and the rest fetch it *worker-to-worker* using single-use HMAC tickets — then pre-warm it into their local model's prompt cache so repeat reviews skip re-ingesting project context entirely (an LMCache/Mooncake idea, adapted to Ollama).
