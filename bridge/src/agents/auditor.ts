@@ -1,4 +1,4 @@
-import type { AppConfig } from "../config.js";
+import { isLocalExecutorProvider, type AppConfig } from "../config.js";
 import { AuditResultSchema, type AuditResult } from "../contracts.js";
 import type { AuditTrail } from "../audit.js";
 import { collectWorkspaceContext, formatWorkspaceContext, unavailableWorkspaceContext } from "../workspace-context.js";
@@ -35,11 +35,12 @@ export class LocalAuditor {
     knowledgeContext?: string,
     onProgress?: (text: string) => void,
   ): Promise<AuditResult> {
-    // Context retrieval is intentionally local-only and bounded. An owner can
-    // point Ollama at another host or select the cloud Developer, but in either
-    // explicit configuration source snippets are withheld rather than being
-    // sent across a network (directly or through an enriched directive).
-    const canUsePrivateContext = isLoopbackEndpoint(this.config.ollamaBaseUrl) && this.config.developerProvider === "ollama";
+    // Context retrieval is intentionally local-only and bounded. Private
+    // context flows to LOCAL executors — the loopback Ollama route and the
+    // on-host Codex CLI, which already holds direct workspace file access —
+    // and never into a prompt bound for a cloud provider. The auditor model
+    // itself must still be loopback before any snippet is read at all.
+    const canUsePrivateContext = isLoopbackEndpoint(this.config.ollamaBaseUrl) && isLocalExecutorProvider(this.config.developerProvider);
     const canUseWorkspaceContext = canUsePrivateContext;
     const workspaceContext = canUseWorkspaceContext
       ? await collectWorkspaceContext(this.config.workspacePath, {
@@ -47,8 +48,8 @@ export class LocalAuditor {
         maxSnippets: this.config.workspaceContextMaxSnippets,
         maxChars: this.config.workspaceContextMaxChars,
       })
-      : unavailableWorkspaceContext(this.config.developerProvider !== "ollama"
-        ? "Workspace source context was withheld because the selected Developer provider is not local Ollama."
+      : unavailableWorkspaceContext(!isLocalExecutorProvider(this.config.developerProvider)
+        ? "Workspace source context was withheld because the selected Developer provider is a cloud route."
         : "Workspace source context was withheld because OLLAMA_BASE_URL is not a loopback endpoint.");
     const prompt = [
       "You are the local, CPU-bound audit agent for a code-writing assistant.",
@@ -64,8 +65,8 @@ export class LocalAuditor {
         ].join("\n")
         : "No earlier private continuity was supplied.",
       // Second Brain recall rides the same privacy gate as workspace
-      // snippets: distilled workspace knowledge enters only the loopback
-      // local-Ollama route, never an enriched directive bound elsewhere.
+      // snippets: distilled workspace knowledge enters only prompts bound
+      // for LOCAL executors, never an enriched directive headed to a cloud.
       knowledgeContext && canUsePrivateContext
         ? [
           "Persistent project memory recalled by the local knowledge graph (bi-temporal; [brain:*] tags cite the capture channel):",

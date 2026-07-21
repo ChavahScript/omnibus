@@ -35,6 +35,20 @@ const ADAPTIVE_TIERS: Array<{ tier: BrainCapacityTier; minTotalMemoryBytes: numb
   { tier: "compact", minTotalMemoryBytes: 0, defaults: { ollamaNumCtx: 8_192, brainMaxNodes: 1_500, brainMaxFacts: 4_000, brainRetrievalTopK: 8, brainRetrievalMaxChars: 2_400, ambientGitPollMs: 90_000, homeFleetWorkerKeepAlive: "2m" } },
 ];
 
+/**
+ * The single definition of the private-context boundary. Local executors —
+ * the loopback Ollama ideation route and the on-host Codex CLI — may receive
+ * distilled workspace knowledge: Codex already holds direct file access to
+ * the workspace, so withholding locally-derived context from its prompt
+ * protects nothing while blinding the executor to recorded decisions and
+ * anti-patterns. The cloud Responses route receives none of it, ever.
+ * Untrusted Home Fleet peer text is a separate, stricter rule: it never
+ * reaches ANY tool-using executor regardless of this predicate.
+ */
+export function isLocalExecutorProvider(provider: AppConfig["developerProvider"]): boolean {
+  return provider === "ollama" || provider === "codex-cli";
+}
+
 export function resolveBrainCapacityTier(totalMemoryBytes: number): BrainCapacityTier {
   return (ADAPTIVE_TIERS.find(entry => totalMemoryBytes >= entry.minTotalMemoryBytes) ?? ADAPTIVE_TIERS[ADAPTIVE_TIERS.length - 1]!).tier;
 }

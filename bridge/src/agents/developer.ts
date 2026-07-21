@@ -55,6 +55,7 @@ export class DeveloperAgent {
     onProgress: (text: string) => void,
     webResearch?: WebResearchResult,
     peerReviews: HomeFleetPeerReview[] = [],
+    guardrails?: string,
   ): Promise<DeveloperResult> {
     if (!this.config.hostExecutionEnabled && this.config.developerProvider === "codex-cli") {
       throw new Error("Host execution is disabled. Set HOST_EXECUTION_ENABLED=true only on the owner-controlled laptop.");
@@ -77,7 +78,12 @@ export class DeveloperAgent {
         data: { provider: this.config.developerProvider, reason: "peer output is local-ollama-ideation-only" },
       });
     }
-    const prompt = buildDeveloperPrompt(this.config, audit, mode, webResearch, localPeerReviews);
+    // Second Brain guardrails reach LOCAL executors only. They are the
+    // owner's own recorded decisions/anti-patterns — trusted content, unlike
+    // fleet peer text — and orchestration supplies them solely for codex-cli
+    // (the Ollama route already carries this knowledge via the Auditor).
+    const localGuardrails = this.config.developerProvider !== "responses" ? guardrails : undefined;
+    const prompt = buildDeveloperPrompt(this.config, audit, mode, webResearch, localPeerReviews, localGuardrails);
     await this.audit.append({ at: new Date().toISOString(), correlationId, agent: "developer", event: "developer_start", data: { provider: this.config.developerProvider, mode, prompt } });
     let result: DeveloperResult;
     switch (this.config.developerProvider) {
@@ -285,18 +291,20 @@ function normalizePeerReviews(reviews: HomeFleetPeerReview[]): HomeFleetPeerRevi
     });
 }
 
-function buildDeveloperPrompt(
+export function buildDeveloperPrompt(
   config: AppConfig,
   audit: AuditResult,
   mode: DeveloperMode,
   webResearch?: WebResearchResult,
   peerReviews: HomeFleetPeerReview[] = [],
+  guardrails?: string,
 ): string {
   const auditContext = [
     `Auditor risk summary: ${audit.riskSummary.join(" | ") || "none"}`,
     `Auditor rationale: ${audit.rationaleSummary}`,
     `Enriched directive:\n${audit.enrichedDirective}`,
   ];
+  const guardrailContext = guardrails ? [guardrails] : [];
   const researchContext = webResearch
     ? [
       "The owner explicitly approved a web-research pass for this idea.",
@@ -338,6 +346,7 @@ function buildDeveloperPrompt(
       ? "This is planning-only work. Inspect safely and return a plan; do not modify files."
       : "Make the smallest correct change, run focused verification, and end with a concise summary plus any remaining risk.",
     "Never read credentials or modify files outside that workspace. Do not bypass sandbox or confirmation protections.",
+    ...guardrailContext,
     ...auditContext,
     ...researchContext,
     ...homeFleetContext,

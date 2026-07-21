@@ -1,6 +1,7 @@
 import path from "node:path";
+import { spawn } from "node:child_process";
 import type { AuditTrail } from "../audit.js";
-import type { AppConfig } from "../config.js";
+import { isLocalExecutorProvider, type AppConfig } from "../config.js";
 import type { BrainStatusEvent } from "../contracts.js";
 import { AmbientCaptureService } from "./ambient-capture.js";
 import { AntiPatternRegistry } from "./anti-patterns.js";
@@ -118,14 +119,16 @@ export class SecondBrain {
 
   /**
    * HippoRAG recall + digital-twin prevention context for a new idea. Returns
-   * undefined under exactly the same privacy gate as workspace snippets: only
-   * the loopback local-Ollama route may see distilled workspace knowledge.
+   * undefined under exactly the same privacy gate as workspace snippets:
+   * distilled workspace knowledge reaches LOCAL executors only (loopback
+   * Ollama, or the on-host Codex CLI which already reads the workspace this
+   * knowledge was distilled from) — never a cloud-bound prompt.
    */
   public async enrichIdea(correlationId: string, directive: string): Promise<string | undefined> {
     if (!this.enabled) return undefined;
-    if (this.config.developerProvider !== "ollama" || !isLoopback(this.config.ollamaBaseUrl)) {
+    if (!isLocalExecutorProvider(this.config.developerProvider) || !isLoopback(this.config.ollamaBaseUrl)) {
       await this.auditEvent(correlationId, "brain_context_withheld", {
-        reason: this.config.developerProvider !== "ollama" ? "developer_provider_is_not_local_ollama" : "ollama_endpoint_is_not_loopback",
+        reason: !isLocalExecutorProvider(this.config.developerProvider) ? "developer_provider_is_a_cloud_route" : "ollama_endpoint_is_not_loopback",
       });
       return undefined;
     }
@@ -174,6 +177,56 @@ export class SecondBrain {
         .captureDiscussion({ correlationId, role: "peer-review", text: `${review.label}: ${review.summary}` })
         .catch(() => undefined);
     }
+  }
+
+  /**
+   * Explicit guardrails for a tool-using LOCAL executor (Codex CLI): the
+   * ideas this project has already rejected, the bugs it already fixed, and
+   * the anti-patterns it refuses — so the executor matches the owner's
+   * recorded vision instead of rediscovering it. Never used on cloud routes.
+   */
+  public async executionGuardrails(directive: string): Promise<string | undefined> {
+    if (!this.enabled) return undefined;
+    const prevention = await this.twin.preventionContext(directive, 1_400).catch(() => "");
+    const digest = this.registry.promptDigest(2_400);
+    const parts = [prevention, digest].filter(Boolean);
+    if (!parts.length) return undefined;
+    return [
+      "Project guardrails recorded by the owner's Second Brain. Honor them; where a guardrail conflicts with the directive, say so instead of silently violating it.",
+      ...parts,
+    ].join("\n\n").slice(0, 4_400);
+  }
+
+  /**
+   * Audits the WORKING TREE's current diff against the anti-pattern registry
+   * — the "what did the executor actually change" check that runs after a
+   * Codex build pass. Read-only git (same no-locks discipline as the ambient
+   * watcher), bounded, best-effort; returns undefined when clean, absent, or
+   * anything fails.
+   */
+  public async antiPatternDiffAppendix(): Promise<string | undefined> {
+    if (!this.enabled) return undefined;
+    const diff = await readWorkingTreeDiff(this.config.workspacePath);
+    if (!diff) return undefined;
+    // Only lines the executor ADDED are examined; context/removed lines
+    // would blame pre-existing code the executor never touched.
+    const added = diff
+      .split("\n")
+      .filter(line => line.startsWith("+") && !line.startsWith("+++"))
+      .map(line => line.slice(1))
+      .join("\n")
+      .slice(0, 131_072);
+    if (!added.trim()) return undefined;
+    const check = this.registry.check(added, { language: "typescript" });
+    if (!check.violations.length) return undefined;
+    const lines = check.violations.slice(0, 4).map(violation =>
+      `- ${violation.pattern.title} (${violation.pattern.severity}): ${violation.excerpt}\n  Correct form:\n${indent(violation.pattern.correct, "  ")}`,
+    );
+    return [
+      "Anti-pattern check of the executor's workspace changes (Second Brain):",
+      ...lines,
+      check.violations.length > 4 ? `…and ${check.violations.length - 4} more. Run \`omnibus-bridge hook check\` after staging.` : "",
+    ].filter(Boolean).join("\n");
   }
 
   /**
@@ -284,6 +337,42 @@ export class SecondBrain {
       // Observability writes never interrupt an idea.
     }
   }
+}
+
+/** Bounded, read-only `git diff` of the working tree; null on any failure. */
+function readWorkingTreeDiff(workspacePath: string): Promise<string | null> {
+  return new Promise(resolve => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "diff", "--unified=0", "--no-color"], {
+        cwd: workspacePath,
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let output = "";
+    let settled = false;
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      finish(null);
+    }, 10_000);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (output.length < 262_144) output += chunk.toString("utf8");
+    });
+    child.once("error", () => finish(null));
+    child.once("close", code => finish(code === 0 && output.trim() ? output : null));
+  });
 }
 
 function isLoopback(value: string): boolean {

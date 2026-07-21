@@ -157,3 +157,10 @@ test("cross-field requirements keep their ENV VAR wording", () => {
     /OPENAI_API_KEY is required for DEVELOPER_PROVIDER=responses/,
   );
 });
+
+test("the private-context boundary admits local executors and excludes the cloud route", async () => {
+  const { isLocalExecutorProvider } = await import("./config.js");
+  assert.equal(isLocalExecutorProvider("ollama"), true);
+  assert.equal(isLocalExecutorProvider("codex-cli"), true);
+  assert.equal(isLocalExecutorProvider("responses"), false);
+});

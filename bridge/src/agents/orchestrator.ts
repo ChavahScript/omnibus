@@ -1,6 +1,6 @@
 import type { AuditTrail } from "../audit.js";
 import { randomUUID } from "node:crypto";
-import type { AppConfig } from "../config.js";
+import { isLocalExecutorProvider, type AppConfig } from "../config.js";
 import type { AgentName, BridgeEvent, ClientCommand, QueueJob } from "../contracts.js";
 import type { SerializableAgentMemory } from "../memory.js";
 import { DurableCommandQueue } from "../queue.js";
@@ -374,7 +374,14 @@ export class CommandOrchestrator {
         const developer = new DeveloperAgent(this.config, this.audit);
         const stage = command.mode === "plan" ? "ideate" : "execute";
         status("developer", stage, developer.startMessage(command.mode));
-        const result = await developer.execute(correlationId, audited, command.mode, text => status("developer", "progress", text), webResearch, peerReviews);
+        // Codex works hand in hand with the Second Brain: the tool-using
+        // executor receives recorded decisions and anti-patterns as explicit
+        // guardrails. The Ollama route already carries this knowledge through
+        // the Auditor's prompt, and the cloud route never receives it.
+        const guardrails = this.config.developerProvider === "codex-cli" && this.brain
+          ? await this.brain.executionGuardrails(command.directive).catch(() => undefined)
+          : undefined;
+        const result = await developer.execute(correlationId, audited, command.mode, text => status("developer", "progress", text), webResearch, peerReviews, guardrails);
         // Recording usage remains observational: the normal route is local
         // Ollama and this ledger never limits or denies a queued idea.
         emit({ type: "usage", usage: this.usage.record(result.usage) });
@@ -385,6 +392,14 @@ export class CommandOrchestrator {
         // model's own report.
         const antiPatternNote = this.brain?.antiPatternAppendix(summary);
         if (antiPatternNote) summary = `${summary}\n\n${antiPatternNote}`;
+        // After Codex has actually edited the workspace, audit what changed:
+        // the working-tree diff is checked against the anti-pattern registry
+        // so the owner sees at once whether the executor's edits repeat a
+        // recorded mistake. Read-only, bounded, and best-effort.
+        if (this.config.developerProvider === "codex-cli" && command.mode === "build" && this.brain) {
+          const diffNote = await this.brain.antiPatternDiffAppendix().catch(() => undefined);
+          if (diffNote) summary = `${summary}\n\n${diffNote}`;
+        }
         await this.memory.append(correlationId, "developer", "result", summary, ownerScope);
         // Inference is over; release the fleet-provisioning gate before the
         // phone sees the result so an immediate follow-up is not refused.
@@ -514,17 +529,19 @@ export class CommandOrchestrator {
 
   /**
    * Cross-request continuity remains fully local and scoped to one live
-   * paired session. Cloud/codex routes intentionally receive no saved ideas or
-   * prior model work through the audit prompt.
+   * paired session. It reaches LOCAL executors only — the loopback Ollama
+   * route and the on-host Codex CLI, which already reads the workspace the
+   * memory was distilled from. The cloud Responses route never receives
+   * saved ideas or prior model work through any prompt.
    */
   private async buildPrivateMemoryContext(ownerScope: string, correlationId: string): Promise<string | undefined> {
-    if (this.config.developerProvider !== "ollama" || !isLoopbackEndpoint(this.config.ollamaBaseUrl)) {
+    if (!isLocalExecutorProvider(this.config.developerProvider) || !isLoopbackEndpoint(this.config.ollamaBaseUrl)) {
       await this.audit.append({
         at: new Date().toISOString(),
         correlationId,
         agent: "system",
         event: "memory_context_withheld",
-        data: { reason: this.config.developerProvider !== "ollama" ? "developer_provider_is_not_local_ollama" : "ollama_endpoint_is_not_loopback" },
+        data: { reason: !isLocalExecutorProvider(this.config.developerProvider) ? "developer_provider_is_a_cloud_route" : "ollama_endpoint_is_not_loopback" },
       });
       return undefined;
     }

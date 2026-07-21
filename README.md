@@ -1,9 +1,19 @@
 # Omnibus
 
-Omnibus is a local-first ideation room for developers. Pair an iPhone to a
-laptop with a one-time QR code, give the phone a rough thought, and let the
-laptop turn it into a decision-ready brief and a prompt for the developer’s
-main IDE.
+Omnibus is a local-first, side-by-side assistant for software developers. Pair
+an iPhone to a laptop with a one-time QR code, give the phone a rough thought,
+and the laptop rigorously audits and fleshes out that prompt against a
+persistent **Second Brain** — a bi-temporal knowledge graph that ambiently
+watches your project — before returning a decision-ready brief and a
+build-ready prompt for your main IDE agent. It is designed to be *present* in
+your project: it knows what changed, remembers the trade-offs, and holds the
+vision, so every idea comes back matching how your codebase actually works.
+
+**It works hand in hand with Codex.** Point the Developer route at the local
+Codex CLI and Omnibus hands the executor its Second Brain guardrails — your
+recorded decisions, past bug fixes, and structured anti-patterns — *before* it
+edits the workspace, then audits Codex's own diff against those anti-patterns
+afterward. Omnibus becomes the memory and the reviewer around Codex's hands.
 
 The dashboard is currently an iPhone/iOS app. Its local Node bridge can run on
 a Mac or a Windows laptop, so a Windows machine can be the primary coordinator
@@ -12,6 +22,9 @@ even though building the iOS app itself still requires Apple tooling.
 The default route uses local Ollama models only. The phone holds no model
 credentials, the bridge binds to the laptop loopback interface, and optional
 Codex CLI or GPT-5.6 Responses use is an explicit laptop-side configuration.
+Locally-derived knowledge (workspace snippets, recalled facts, guardrails)
+reaches the two **local** executors — the loopback Ollama route and the on-host
+Codex CLI — but never the cloud Responses route.
 
 > The $100 limit was the team’s hackathon construction budget—not a feature
 > limit imposed on an Omnibus user. Runtime usage is now observational
@@ -26,7 +39,8 @@ Codex CLI or GPT-5.6 Responses use is an explicit laptop-side configuration.
 | QR-paired Fleet Setup | Implemented | The paired app receives a path-free laptop capacity summary, recommends one of four named local Ollama fleets, and can explicitly approve the selected local model download. |
 | Home Fleet | Implemented, opt-in | A coordinator can ask explicitly paired spare laptops on the same trusted private LAN for bounded local peer reviews. Each worker must be actively approved and each idea asks for separate consent. |
 | Local-first ideation | Implemented | A bounded, durable serial queue runs a local Ollama Auditor with safe workspace context, then a local Developer pass returns an inspectable report and paste-ready IDE prompt. |
-| Codex CLI | Implemented, opt-in | Requires DEVELOPER_PROVIDER=codex-cli and explicit host-execution arming. plan is read-only; build stays workspace-bounded. |
+| Codex CLI | Implemented, opt-in | Requires DEVELOPER_PROVIDER=codex-cli and explicit host-execution arming. plan is read-only; build stays workspace-bounded. Receives Second Brain guardrails (decisions, bug fixes, anti-patterns) before executing, and its resulting diff is audited against those anti-patterns after. |
+| Second Brain ↔ Codex synergy | Implemented | The knowledge graph feeds the on-host Codex executor its recorded guardrails up front and reviews the working-tree diff Codex produces; the cloud Responses route receives no locally-derived context, ever. |
 | GPT-5.6 Responses | Implemented, opt-in | Requires a laptop-side OPENAI_API_KEY; it returns a result but never executes host commands. |
 | Audit trail | Implemented | Redacted append-only NDJSON contains prompts, safe-context metadata, observable local stream chunks, Ollama latency/token metrics, agent outputs, queue state, and usage telemetry. |
 | iOS ideation UI | Implemented | Persistent first-pair tutorial, Skia/Reanimated loading animation, monochrome idea room, local history, telemetry, live connection health, agent calls, and a mist-to-brief transition. |
