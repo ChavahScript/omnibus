@@ -2,7 +2,7 @@
   "platforms": ["apple"],
   "apple": {
     "modules": ["HapticBridgeModule"],
-    "podspecPath": "CEOOfficeHaptics.podspec",
-    "swiftModuleName": "CEOOfficeHaptics"
+    "podspecPath": "OmnibusHaptics.podspec",
+    "swiftModuleName": "OmnibusHaptics"
   }
 }

@@ -8,9 +8,9 @@ require "shellwords"
 platform :ios do
   MOBILE_DIR = File.expand_path("..", __dir__)
   IOS_DIR = File.join(MOBILE_DIR, "ios")
-  XCODEPROJ = File.join(IOS_DIR, "CEOOffice.xcodeproj")
-  WORKSPACE = File.join(IOS_DIR, "CEOOffice.xcworkspace")
-  SCHEME = "CEOOffice"
+  XCODEPROJ = File.join(IOS_DIR, "Omnibus.xcodeproj")
+  WORKSPACE = File.join(IOS_DIR, "Omnibus.xcworkspace")
+  SCHEME = "Omnibus"
   ARTIFACTS_DIR = File.join(MOBILE_DIR, "artifacts/ios")
 
   def required_environment!(keys)

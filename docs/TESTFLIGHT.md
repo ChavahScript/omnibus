@@ -49,7 +49,7 @@ Create the record. You do not need store metadata or screenshots to distribute a
 
 ## 4. Configure signing once in Xcode
 
-Open `mobile/ios/CEOOffice.xcworkspace` — not the `.xcodeproj`. Select target **CEOOffice** → **Signing & Capabilities**, then:
+Open `mobile/ios/Omnibus.xcworkspace` — not the `.xcodeproj`. Select target **Omnibus** → **Signing & Capabilities**, then:
 
 1. Enable **Automatically manage signing**.
 2. Choose the team associated with your paid Developer Program membership.

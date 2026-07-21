@@ -2,7 +2,6 @@ node_modules/
 dist/
 .env
 .DS_Store
-.ceo-office/
 # Runtime bridge state: audit trails, queue, HMAC pairing secrets, brain graph.
 .omnibus/
 mobile/ios/Pods/
