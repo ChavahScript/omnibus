@@ -16,6 +16,7 @@ import {
   savePairedBridgeProfile,
 } from "./src/localData";
 import { colors } from "./src/theme";
+import { playOfficeHaptic } from "./src/haptics";
 import type { LocalAppleProfile } from "./src/localData";
 import { isHomeFleetInviteStale } from "./src/types";
 import type { AgentName, BrainStatus, BridgeEvent, BridgeResumeProfile, CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, HomeFleetInvite, UsageStatus } from "./src/types";
@@ -73,6 +74,10 @@ function OmnibusApp(): React.JSX.Element {
   const [scannerVisible, setScannerVisible] = useState(false);
   const [connected, setConnected] = useState(false);
   const [connectionPresence, setConnectionPresence] = useState<ConnectionPresence>("offline");
+  // True once the owner has seen a live link drop to offline/stale since the
+  // last verified hello. It distinguishes a felt recovery (haptic) from a
+  // silent background resume the user never noticed (no haptic).
+  const sawVisibleDisconnect = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [hasPairedBefore, setHasPairedBefore] = useState<boolean | null>(null);
   const [setupVisible, setSetupVisible] = useState(false);
@@ -147,6 +152,7 @@ function OmnibusApp(): React.JSX.Element {
     const respondedRecently = Date.now() - lastResponsiveAt.current <= HEARTBEAT_STALE_MS;
     if (!connection.ping() || !respondedRecently) {
       setConnectionPresence("stale");
+      sawVisibleDisconnect.current = true;
       // A phone coming out of iOS suspension can retain an OPEN-looking
       // native socket that no longer carries packets. Give the bridge a calm,
       // bounded fresh upgrade rather than waiting forever for that socket.
@@ -279,6 +285,13 @@ function OmnibusApp(): React.JSX.Element {
       setPairingError(null);
       markBridgeResponsive();
       startHeartbeat();
+      // The laptop link engaging feels like a relay closing — but only when
+      // the owner would notice: a fresh scan, or recovery from a link drop
+      // they actually saw. A silent background resume must not thunk.
+      if (manualPairingAttempted.current || sawVisibleDisconnect.current) {
+        playOfficeHaptic("HeavySwitch");
+      }
+      sawVisibleDisconnect.current = false;
       rememberSuccessfulPairing();
       // The bridge emits its own snapshot too, but requesting it here makes a
       // reconnect deterministic and avoids leaving a paired owner in an empty
@@ -327,6 +340,10 @@ function OmnibusApp(): React.JSX.Element {
       setUsage(event.usage);
     } else if (event.type === "result") {
       append(event.agent, "result", event.summary, event.correlationId);
+      // A completed idea distills into the Second Brain on the laptop; ask for
+      // fresh counters so the on-dashboard graph visibly grows as it absorbs
+      // this brief. Safely a no-op when the socket is down.
+      connection.requestBrainStatus();
     } else if (event.type === "error") {
       if ((event.code.startsWith("FLEET_") && event.code !== "FLEET_PROVISIONING") || event.code.startsWith("HOME_FLEET_") || event.code === "LOCAL_TEAM_BUSY" || event.code === "OLLAMA_UNAVAILABLE" || event.code === "RESEARCH_KEY_REQUIRED") setFleetBusy(false);
       append("system", event.code, event.message, event.correlationId, "error");
@@ -343,6 +360,12 @@ function OmnibusApp(): React.JSX.Element {
     stopHeartbeat();
     setConnected(false);
     setConnectionPresence("offline");
+    // A live paired link dropping is a felt loss: the same unresolved-grind
+    // vocabulary as an idea failing, cut mid-swell, never the success thunk.
+    if (wasPaired) {
+      sawVisibleDisconnect.current = true;
+      playOfficeHaptic("RotaryRumble", 300);
+    }
     setIsConnecting(false);
     setActiveCall(null);
     setHomeFleetInvite(null);
@@ -479,6 +502,7 @@ function OmnibusApp(): React.JSX.Element {
           messages={messages}
           pairingError={pairingError}
           fleet={fleet}
+          brain={brain}
           hasLocalAppleProfile={localAppleProfile !== null}
           onOpenAccount={() => setSetupVisible(true)}
           onOpenFleet={() => {

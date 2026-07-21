@@ -35,9 +35,12 @@ public final class HapticBridgeModule: Module {
 
     // AHAP carries the calibrated intensity/sharpness curve. The optional stop
     // time lets a Skia/Reanimated interaction cut a continuous rumble short.
+    // The timer captures THIS player, not self.activePlayer: a pending stop
+    // from an earlier bounded rumble must never cut a newer pattern short if
+    // one starts inside its window.
     if durationMs > 0 {
-      DispatchQueue.main.asyncAfter(deadline: .now() + durationMs / 1000) { [weak self] in
-        try? self?.activePlayer?.stop(atTime: CHHapticTimeImmediate)
+      DispatchQueue.main.asyncAfter(deadline: .now() + durationMs / 1000) { [weak player] in
+        try? player?.stop(atTime: CHHapticTimeImmediate)
       }
     }
   }

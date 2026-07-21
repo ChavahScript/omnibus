@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { VectorIcon } from "./VectorIcon";
+import { playOfficeHaptic } from "../haptics";
 import { colors } from "../theme";
 
 export function QRScanner({ visible, onCode, onClose }: { visible: boolean; onCode: (value: string) => void; onClose: () => void }): React.JSX.Element | null {
@@ -13,7 +14,7 @@ export function QRScanner({ visible, onCode, onClose }: { visible: boolean; onCo
   if (!visible) return null;
   if (!permission?.granted) return <Modal visible transparent animationType="slide"><View style={styles.permission}><Text style={styles.permissionText}>Camera access is used only to scan the one-time pairing code from your laptop.</Text><Pressable style={styles.permissionButton} onPress={() => void requestPermission()}><Text style={styles.actionText}>ALLOW CAMERA</Text></Pressable><Pressable onPress={onClose}><Text style={styles.cancel}>Cancel</Text></Pressable></View></Modal>;
   return <Modal visible animationType="slide"><View style={styles.screen}>
-    <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned ? undefined : event => { setScanned(true); onCode(event.data); }} />
+    <CameraView style={StyleSheet.absoluteFill} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned ? undefined : event => { setScanned(true); playOfficeHaptic("HeavySwitch"); onCode(event.data); }} />
     <View style={styles.top}><Text style={styles.title}>PAIR YOUR LAPTOP</Text><Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close scanner"><Text style={styles.cancel}>Close</Text></Pressable></View>
     <View style={styles.frame}><View style={[styles.corner, styles.topLeft]} /><View style={[styles.corner, styles.topRight]} /><View style={[styles.corner, styles.bottomLeft]} /><View style={[styles.corner, styles.bottomRight]} /></View>
     <View style={styles.instructions}><VectorIcon name="scan" color={colors.paper} /><Text style={styles.instructionText}>Scan the one-time code printed by the Omnibus bridge. After it verifies, this iPhone can securely reconnect while the bridge stays available.</Text></View>

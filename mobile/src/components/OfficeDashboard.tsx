@@ -1,7 +1,7 @@
 import * as Clipboard from "expo-clipboard";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { IdeaAtmosphere } from "./IdeaAtmosphere";
 import { OmnibusMark } from "./OmnibusMark";
 import { VectorIcon } from "./VectorIcon";
@@ -10,7 +10,7 @@ import { colors, springs } from "../theme";
 import { playOfficeHaptic } from "../haptics";
 import { acceptsRecoveredBrief, isIdeaTerminalFailure, localIdeaIssue } from "../types";
 import type { LocalIdeaRecord } from "../localData";
-import type { CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, IdeaPhase, UsageStatus } from "../types";
+import type { BrainStatus, CommandMode, ConnectionPresence, DashboardMessage, FleetSnapshot, IdeaPhase, UsageStatus } from "../types";
 
 type PendingCommand = {
   directive: string;
@@ -26,6 +26,7 @@ type OmnibusDashboardProps = {
   messages: DashboardMessage[];
   pairingError?: string | null;
   fleet: FleetSnapshot | null;
+  brain: BrainStatus | null;
   hasLocalAppleProfile: boolean;
   onOpenAccount: () => void;
   onOpenFleet: () => void;
@@ -39,7 +40,7 @@ type OmnibusDashboardProps = {
  * prompt for the owner’s main IDE. The client deliberately exposes only that
  * single useful path instead of leaking provider/model machinery into the UI.
  */
-export function OfficeDashboard({ connected, connectionPresence, usage, messages, pairingError, fleet, hasLocalAppleProfile, onOpenAccount, onOpenFleet, onPair, onCommand }: OmnibusDashboardProps): React.JSX.Element {
+export function OfficeDashboard({ connected, connectionPresence, usage, messages, pairingError, fleet, brain, hasLocalAppleProfile, onOpenAccount, onOpenFleet, onPair, onCommand }: OmnibusDashboardProps): React.JSX.Element {
   const [idea, setIdea] = useState("");
   const [ideaIssue, setIdeaIssue] = useState<string | null>(null);
   const [phase, setPhase] = useState<IdeaPhase>("idle");
@@ -154,6 +155,29 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
     }
   }, [activeRecordId, connected, phase, submittedHomeFleet, submittedIdea, submittedMode, submittedResearch]);
 
+  // Arrival haptics: the payoff moments the app was previously mute on. A
+  // brief landing is the decisive success thunk; an idea dying is the same
+  // unresolved grind used for connection loss, clearly distinct from success.
+  useEffect(() => {
+    if (phase === "ready") playOfficeHaptic("HeavySwitch");
+    else if (phase === "failed") playOfficeHaptic("RotaryRumble", 300);
+  }, [phase]);
+
+  // The Second Brain recall moment: when the Auditor reports it connected this
+  // idea to past project memory, pulse the ambient constellation. A rising
+  // counter (not a boolean) lets the atmosphere re-fire the pulse each time.
+  const recallSignal = useMemo(() => activeCorrelationId
+    ? [...messages].reverse().find(message => message.stage === "recall" && message.correlationId === activeCorrelationId)
+    : undefined, [activeCorrelationId, messages]);
+  const [recallPulse, setRecallPulse] = useState(0);
+  const lastRecallId = useRef<string | null>(null);
+  useEffect(() => {
+    if (recallSignal && recallSignal.id !== lastRecallId.current) {
+      lastRecallId.current = recallSignal.id;
+      setRecallPulse(pulse => pulse + 1);
+    }
+  }, [recallSignal]);
+
   const beginCommand = useCallback((directive: string, requestedMode: CommandMode, requestedResearch: boolean, requestedHomeFleet: boolean) => {
     Keyboard.dismiss();
     playOfficeHaptic("HeavySwitch");
@@ -263,7 +287,7 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
         : "PAIR LAPTOP";
 
   return <KeyboardAvoidingView style={styles.root} behavior={Platform.select({ ios: "padding", default: undefined })}>
-    <IdeaAtmosphere active={phase === "shaping"} settled={phase === "ready"} />
+    <IdeaAtmosphere active={phase === "shaping"} settled={phase === "ready"} brain={brain} recallPulse={recallPulse} />
     <View style={styles.header}>
       <View style={styles.brand}><View style={styles.mark}><OmnibusMark size={26} /></View><View><Text style={styles.brandName}>OMNIBUS</Text><Text style={styles.brandSub}>{hasLocalAppleProfile ? "APPLE / LOCAL PROFILE" : "LOCAL WORKING ROOM"}</Text></View></View>
       <View style={styles.headerActions}>
@@ -271,7 +295,7 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
           <VectorIcon name="history" size={17} color={colors.paper} />
         </Pressable>
         <Pressable onPress={onPair} style={({ pressed }) => [styles.connection, pressed && styles.connectionPressed]} accessibilityRole="button" accessibilityLabel={connected ? "Pair another laptop" : "Pair laptop"}>
-          <View style={[styles.statusDot, connectionPresence === "live" && styles.statusDotLive, (connectionPresence === "checking" || connectionPresence === "connecting") && styles.statusDotChecking, connectionPresence === "stale" && styles.statusDotStale]} />
+          <ConnectionPresenceDot presence={connectionPresence} />
           <Text style={styles.connectionText}>{connectionLabel}</Text>
         </Pressable>
       </View>
@@ -328,6 +352,64 @@ export function OfficeDashboard({ connected, connectionPresence, usage, messages
       onConfirm={confirmPendingCommand}
     /> : null}
   </KeyboardAvoidingView>;
+}
+
+/**
+ * A living link indicator. On a live link the core breathes; while checking it
+ * ripples with a soft repeating pulse; stale and offline are quiet by design so
+ * the header never nags on a flaky tunnel. Replaces the former static dot.
+ */
+function ConnectionPresenceDot({ presence }: { presence: ConnectionPresence }): React.JSX.Element {
+  const pulse = useSharedValue(0);
+  const breathe = useSharedValue(0);
+  useEffect(() => {
+    cancelAnimation(pulse);
+    cancelAnimation(breathe);
+    if (presence === "live") {
+      breathe.value = withRepeat(withSequence(withTiming(1, { duration: 1500 }), withTiming(0, { duration: 1500 })), -1, false);
+    } else if (presence === "checking" || presence === "connecting") {
+      pulse.value = withRepeat(withTiming(1, { duration: 1100 }), -1, false);
+    }
+    return () => {
+      cancelAnimation(pulse);
+      cancelAnimation(breathe);
+    };
+  }, [presence, pulse, breathe]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: presence === "checking" || presence === "connecting" ? (1 - pulse.value) * 0.5 : 0,
+    transform: [{ scale: 0.6 + pulse.value * 1.4 }],
+  }));
+  const coreStyle = useAnimatedStyle(() => ({
+    opacity: presence === "live" ? 0.7 + breathe.value * 0.3 : 1,
+    transform: [{ scale: presence === "live" ? 0.9 + breathe.value * 0.2 : 1 }],
+  }));
+  const coreExtra = presence === "live" ? styles.statusDotLive
+    : presence === "checking" || presence === "connecting" ? styles.statusDotChecking
+      : presence === "stale" ? styles.statusDotStale : null;
+  return <View style={styles.presenceWrap}>
+    <Animated.View style={[styles.presenceRing, ringStyle]} pointerEvents="none" />
+    <Animated.View style={[styles.statusDot, coreExtra, coreStyle]} />
+  </View>;
+}
+
+/**
+ * A status line that springs in on mount rather than snapping into place, so
+ * the live review visibly progresses. A recall line — the Second Brain
+ * connecting the idea to past project memory — arrives brighter and marked.
+ */
+function SignalRow({ text, recalled }: { text: string; recalled: boolean }): React.JSX.Element {
+  const lift = useSharedValue(12);
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    lift.value = withSpring(0, springs.entrance);
+    opacity.value = withSpring(1, springs.entrance);
+  }, [lift, opacity]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value, transform: [{ translateY: lift.value }] }));
+  return <Animated.View style={[styles.signal, style]}>
+    <View style={[styles.signalDot, recalled && styles.signalDotRecall]} />
+    <Text style={[styles.signalText, recalled && styles.signalTextRecall]}>{text}</Text>
+  </Animated.View>;
 }
 
 function IdeaComposer({
@@ -398,7 +480,7 @@ function IdeaComposer({
     {isShaping ? <View style={styles.processing}>
       <Text style={styles.quotedIdea}>“{submittedIdea}”</Text>
       <View style={styles.signalList}>
-        {signals.length ? signals.map(signal => <View key={signal.id} style={styles.signal}><View style={styles.signalDot} /><Text style={styles.signalText}>{signal.text}</Text></View>) : <View style={styles.signal}><View style={styles.signalDot} /><Text style={styles.signalText}>Preparing the local review…</Text></View>}
+        {signals.length ? signals.map(signal => <SignalRow key={signal.id} text={signal.text} recalled={signal.stage === "recall"} />) : <SignalRow key="placeholder" text="Preparing the local review…" recalled={false} />}
       </View>
     </View> : isFailed ? <View style={styles.failure}>
       <Text style={styles.failureTitle}>The local review did not return.</Text>
@@ -841,6 +923,8 @@ const styles = StyleSheet.create({
   statusDotLive: { backgroundColor: colors.paper, shadowColor: colors.paper, shadowOpacity: 0.75, shadowRadius: 5 },
   statusDotChecking: { backgroundColor: colors.paperMuted, shadowColor: colors.paperMuted, shadowOpacity: 0.42, shadowRadius: 4 },
   statusDotStale: { backgroundColor: colors.surfaceRaised, borderWidth: 1, borderColor: colors.paperMuted },
+  presenceWrap: { width: 12, height: 12, alignItems: "center", justifyContent: "center" },
+  presenceRing: { position: "absolute", width: 12, height: 12, borderRadius: 6, borderWidth: 1, borderColor: colors.paper },
   connectionText: { color: colors.paper, fontSize: 9, letterSpacing: 0.8, fontWeight: "800" },
   scroll: { flexGrow: 1, paddingHorizontal: 23, paddingBottom: 46 },
   composer: { flex: 1, paddingTop: 58, minHeight: 630 },
@@ -913,7 +997,9 @@ const styles = StyleSheet.create({
   signalList: { marginTop: 34, gap: 13 },
   signal: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   signalDot: { marginTop: 6, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.paper, shadowColor: colors.paper, shadowOpacity: 0.8, shadowRadius: 7 },
+  signalDotRecall: { width: 8, height: 8, borderRadius: 4, marginTop: 5, shadowRadius: 11, shadowOpacity: 1 },
   signalText: { color: colors.paperMuted, flex: 1, fontSize: 13, lineHeight: 19 },
+  signalTextRecall: { color: colors.paper, fontWeight: "600" },
   failure: { marginTop: 50, padding: 20, borderWidth: 1, borderColor: colors.lineStrong, borderRadius: 20, backgroundColor: colors.surface },
   failureTitle: { color: colors.paper, fontSize: 18, fontWeight: "700" },
   failureBody: { color: colors.paperMuted, marginTop: 8, lineHeight: 20, fontSize: 14 },

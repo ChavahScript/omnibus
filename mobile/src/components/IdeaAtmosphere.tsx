@@ -1,10 +1,11 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
-import { BlurMask, Canvas, Circle, Group, RoundedRect } from "@shopify/react-native-skia";
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSpring } from "react-native-reanimated";
+import { BlurMask, Canvas, Circle, Group, Line, RoundedRect, vec } from "@shopify/react-native-skia";
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { colors, springs } from "../theme";
+import type { BrainStatus } from "../types";
 
-type AtmosphereProps = { active?: boolean; settled?: boolean; compact?: boolean };
+type AtmosphereProps = { active?: boolean; settled?: boolean; compact?: boolean; brain?: BrainStatus | null; recallPulse?: number };
 
 type ParticleSeed = {
   id: string;
@@ -34,7 +35,7 @@ const IDEA_PARTICLES: ParticleSeed[] = [
  * brief is ready. Reanimated owns every movement on the UI thread, leaving
  * the JS thread free for typing and receiving bridge events.
  */
-export function IdeaAtmosphere({ active = false, settled = false, compact = false }: AtmosphereProps): React.JSX.Element {
+export function IdeaAtmosphere({ active = false, settled = false, compact = false, brain = null, recallPulse = 0 }: AtmosphereProps): React.JSX.Element {
   const { width } = useWindowDimensions();
   const height = compact ? 142 : 280;
   const firstDrift = useSharedValue(-18);
@@ -58,7 +59,15 @@ export function IdeaAtmosphere({ active = false, settled = false, compact = fals
   const canvasWidth = Math.max(width, 320);
   const visibleParticles = compact ? IDEA_PARTICLES.slice(0, 5) : IDEA_PARTICLES;
 
-  return <View pointerEvents="none" style={[styles.root, { height }]}> 
+  return <View pointerEvents="none" style={[styles.root, { height }]}>
+    {brain?.enabled && !compact ? <BrainConstellation
+      width={canvasWidth}
+      height={height}
+      facts={brain.facts}
+      nodes={brain.nodes}
+      active={active}
+      recallPulse={recallPulse}
+    /> : null}
     <Animated.View style={[styles.layer, firstStyle]}>
       <MistCanvas width={canvasWidth} height={height} variant="left" />
     </Animated.View>
@@ -130,6 +139,98 @@ function IdeaParticle({
   return <Animated.View style={[styles.particle, { width: size, height: size }, style]}>
     <Canvas style={StyleSheet.absoluteFill}>
       <Circle cx={size / 2} cy={size / 2} r={size / 2.8} color={colors.mistBright}><BlurMask blur={size / 2.4} style="normal" /></Circle>
+    </Canvas>
+  </Animated.View>;
+}
+
+type ConstellationNode = { x: number; y: number; r: number };
+type ConstellationEdge = { a: number; b: number };
+
+/**
+ * An ambient picture of the laptop's Second Brain: a small knowledge graph
+ * whose node count grows with the real fact/node totals, rendered in the same
+ * faint monochrome Skia language as the mist. It breathes quietly in the
+ * background; when the Auditor reports a recall — the brain connecting this
+ * idea to past project memory — a wave of brightness ripples through it.
+ * Deliberately abstract: it depicts that a memory exists and is being used,
+ * never any fact content (which never leaves the laptop anyway).
+ */
+function BrainConstellation({ width, height, facts, nodes, active, recallPulse }: {
+  width: number;
+  height: number;
+  facts: number;
+  nodes: number;
+  active: boolean;
+  recallPulse: number;
+}): React.JSX.Element {
+  // Node count scales with real knowledge but stays bounded for calm and perf.
+  const count = Math.max(5, Math.min(16, 4 + Math.round(Math.sqrt(Math.max(facts, nodes)))));
+  const layout = useMemo<{ nodes: ConstellationNode[]; edges: ConstellationEdge[] }>(() => {
+    const cx = width / 2;
+    const cy = height * 0.46;
+    const maxR = height * 0.4;
+    const placed: ConstellationNode[] = [];
+    for (let i = 0; i < count; i += 1) {
+      // Golden-angle spiral gives an organic, non-gridded spread; the ×N hash
+      // adds a deterministic jitter so it never looks mechanical yet is stable.
+      const angle = i * 2.399963;
+      const radius = maxR * Math.sqrt((i + 0.6) / count);
+      const jitter = ((i * 928371) % 17) / 17 - 0.5;
+      placed.push({
+        x: cx + Math.cos(angle + jitter) * radius,
+        y: cy + Math.sin(angle + jitter) * radius * 0.82,
+        r: 1.6 + ((i * 7) % 5) * 0.5,
+      });
+    }
+    const edges: ConstellationEdge[] = [];
+    for (let i = 1; i < count; i += 1) {
+      edges.push({ a: i, b: i - 1 });
+      if (i >= 3 && i % 2 === 0) edges.push({ a: i, b: i - 3 });
+    }
+    return { nodes: placed, edges };
+  }, [count, width, height]);
+
+  const drift = useSharedValue(0);
+  const wave = useSharedValue(0);
+  const presence = useSharedValue(0);
+
+  useEffect(() => {
+    drift.value = withRepeat(withSequence(withTiming(1, { duration: 5200 }), withTiming(0, { duration: 5200 })), -1, false);
+  }, [drift]);
+  useEffect(() => {
+    presence.value = withSpring(active ? 1 : 0.55, springs.entrance);
+  }, [active, presence]);
+  // Fire the ripple on a recall, and also when the graph visibly grew after a
+  // completed idea absorbed into memory. recallPulse changing is the trigger.
+  useEffect(() => {
+    if (recallPulse <= 0) return;
+    wave.value = withSequence(withTiming(1, { duration: 240 }), withTiming(0, { duration: 1100 }));
+  }, [recallPulse, wave]);
+  useEffect(() => {
+    // A growing node count is knowledge being absorbed; give it a soft swell.
+    wave.value = withSequence(withTiming(0.7, { duration: 320 }), withTiming(0, { duration: 900 }));
+  }, [count, wave]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: (0.1 + presence.value * 0.12) + wave.value * 0.5,
+    transform: [
+      { translateY: (drift.value - 0.5) * 10 },
+      { scale: 1 + wave.value * 0.05 },
+    ],
+  }));
+
+  return <Animated.View style={[styles.layer, style]} pointerEvents="none">
+    <Canvas style={StyleSheet.absoluteFill}>
+      <Group>
+        {layout.edges.map((edge, index) => {
+          const a = layout.nodes[edge.a]!;
+          const b = layout.nodes[edge.b]!;
+          return <Line key={`e${index}`} p1={vec(a.x, a.y)} p2={vec(b.x, b.y)} color={colors.lineStrong} strokeWidth={1} />;
+        })}
+        {layout.nodes.map((node, index) => <Circle key={`n${index}`} cx={node.x} cy={node.y} r={node.r} color={colors.mistBright}>
+          <BlurMask blur={2.2} style="normal" />
+        </Circle>)}
+      </Group>
     </Canvas>
   </Animated.View>;
 }
