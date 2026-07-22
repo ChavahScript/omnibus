@@ -190,7 +190,7 @@ export function PairingOnboarding({
           {(["mac", "windows"] as const).map(os => (
             <Pressable
               key={os}
-              onPress={() => { setBridgeOS(os); setCopied(false); }}
+              onPress={() => { setBridgeOS(os); setCopied(false); setCopyFailed(false); }}
               style={[styles.osTab, bridgeOS === os && styles.osTabActive]}
               accessibilityRole="tab"
               accessibilityState={{ selected: bridgeOS === os }}

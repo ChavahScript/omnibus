@@ -1542,7 +1542,9 @@ export class HomeFleetWorker {
     // Replay protection keys on the TICKET, not the requester-chosen nonce:
     // a nonce is free to mint, so keying on it would let anyone who observed
     // the plaintext LAN offer redeem the same ticket repeatedly until expiry.
-    // One ticket authorizes exactly one transfer.
+    // One ticket authorizes exactly one transfer: the redeemed ticket is
+    // remembered until its own expiry (below), so — unlike a fixed-window
+    // dedup — it can never be purged while still redeemable.
     if (!isUuidLike(request.nonce)) {
       throw new HomeFleetError("REPLAY_REJECTED", "A context transfer nonce is invalid.");
     }
@@ -1552,7 +1554,7 @@ export class HomeFleetWorker {
     if (!verifyMac(session.secret, contextTicketPayload(request.digest, request.requesterWorkerId, this.workerId, request.ticketExpiresAt), request.ticket)) {
       throw new HomeFleetError("AUTHENTICATION_FAILED", "Context transfer ticket is invalid.");
     }
-    this.contextFetchReplayWindow.add(request.ticket, now.getTime());
+    this.contextFetchReplayWindow.add(request.ticket, now.getTime(), expiresAt);
     const text = this.touchContextBundle(request.digest);
     if (text === undefined) {
       throw new HomeFleetError("REQUEST_REJECTED", "This worker does not hold the requested context bundle.");
@@ -2276,6 +2278,7 @@ function isTimestampFresh(value: string, now: Date): boolean {
 }
 
 class ReplayWindow {
+  /** nonce -> the instant it may be forgotten (ms epoch). */
   private readonly nonces = new Map<string, number>();
 
   public has(nonce: string, now: number): boolean {
@@ -2283,14 +2286,23 @@ class ReplayWindow {
     return this.nonces.has(nonce);
   }
 
-  public add(nonce: string, now: number): void {
+  /**
+   * Remembers `nonce` until `expiresAt` (default: `now + AUTH_WINDOW_MS`, which
+   * reproduces the fixed-window behavior the timestamp-fresh paths rely on).
+   * A caller whose credential can be accepted for longer than the auth window —
+   * the context-fetch ticket, valid until its own `ticketExpiresAt` — must pass
+   * that expiry so the redeemed credential stays remembered for its entire
+   * validity. Otherwise it would be purged while still redeemable, and a
+   * captured request could replay it, breaking the one-ticket-one-transfer rule.
+   */
+  public add(nonce: string, now: number, expiresAt: number = now + AUTH_WINDOW_MS): void {
     this.purge(now);
-    this.nonces.set(nonce, now);
+    this.nonces.set(nonce, expiresAt);
     while (this.nonces.size > MAX_REPLAY_NONCES) this.nonces.delete(this.nonces.keys().next().value!);
   }
 
   private purge(now: number): void {
-    for (const [nonce, at] of this.nonces) if (now - at > AUTH_WINDOW_MS) this.nonces.delete(nonce);
+    for (const [nonce, expiresAt] of this.nonces) if (now > expiresAt) this.nonces.delete(nonce);
   }
 }
 
